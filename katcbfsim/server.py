@@ -157,8 +157,9 @@ class SimulatorServer(katcp.DeviceServer):
 
     @tornado.gen.coroutine
     def request_halt(self, req, msg):
-        """Stop all products and halt the server."""
         for product in self.products.values():
             stop = trollius.async(product.capture_stop())
             yield tornado.platform.asyncio.to_tornado_future(stop)
         yield tornado.gen.maybe_future(super(SimulatorServer, self).request_halt(req, msg))
+
+    request_halt.__doc__ = katcp.DeviceServer.request_halt.__doc__
