@@ -41,17 +41,17 @@ class Subarray(object):
         self.antennas = []
         self.sources = []
         self.sync_time = time.time()
-        self.accumulation_length = 0.5
 
 
-class Product(object):
+class FXProduct(object):
     def __init__(self, subarray, name, bandwidth, channels, loop=None):
         self.name = name
         self.subarray = subarray
-        self.destination = [endpoint.Endpoint('0.0.0.0', 0)]
+        self.destination = None
         self.bandwidth = bandwidth
         self.channels = channels
         self.center_frequency = 1412000000
+        self.accumulation_length = 0.5
         self._active = False
         self._capture_future = None
         self._stop_future = None
@@ -61,28 +61,24 @@ class Product(object):
             self._loop = loop
 
     @property
-    def active(self):
-        return self._active
+    def capturing(self):
+        return self._capture_future is not None
 
-    def activate(self):
-        assert not self._active
+    def capture_start(self):
+        if self.capturing:
+            logger.warn('Ignoring attempt to start capture when already running')
+            return
         # Freeze the subarray so that we're not affected by changes on the
         # master copy
         self.subarray = copy.deepcopy(self.subarray)
-        # TODO: send the initial packets
-        self._active = True
-
-    def capture_start(self):
-        assert self.active
-        if self._capture_future is not None:
-            logger.warn('Ignoring attempt to start capture when already running')
-            return
+        # Create a future that is set by capture_stop
         self._stop_future = trollius.Future(loop=self._loop)
+        # Start the capture coroutine on the event loop
         self._capture_future = trollius.async(self._capture(), loop=self._loop)
 
     @trollius.coroutine
     def capture_stop(self):
-        if self._capture_future is None:
+        if not self.capturing:
             logger.warn('Ignoring attempt to stop capture when not running')
             return
         self._stop_future.set_result(None)
@@ -100,7 +96,7 @@ class Product(object):
                 logging.info('Prepared dump %d', index)
                 # Sleep until either it is time to make the dump, or we are asked
                 # to stop.
-                wall_time += self.subarray.accumulation_length
+                wall_time += self.accumulation_length
                 try:
                     yield From(wait_until(trollius.shield(self._stop_future), wall_time, self._loop))
                 except trollius.TimeoutError:

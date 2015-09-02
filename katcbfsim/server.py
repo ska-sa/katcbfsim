@@ -7,7 +7,8 @@ import tornado
 import logging
 from katcp.kattypes import Str, Float, Int, Address, request, return_reply
 from katsdptelstate import endpoint
-from .product import Subarray, Product
+from .product import Subarray, FXProduct
+from .stream import FXStreamSpead
 
 
 logger = logging.getLogger(__name__)
@@ -32,21 +33,10 @@ class SimulatorServer(katcp.DeviceServer):
         """Create a new simulated correlator productt"""
         if name in self.products:
             return 'fail', 'product {} already exists'.format(name)
-        self.products[name] = Product(self.subarray, name, bandwidth, channels)
+        self.products[name] = FXProduct(self.subarray, name, bandwidth, channels)
         return 'ok',
 
-    @request(Str())
-    @return_reply()
-    def request_product_activate(self, sock, name):
-        """Activate a product created with product-create-correlator."""
-        try:
-            product = self.products[name]
-        except KeyError:
-            return 'fail', 'requested product name not found'
-        product.activate()
-        return 'ok',
-
-    @request(Str(), Address())
+    @request(Str(), Str())
     @return_reply()
     def request_capture_destination(self, sock, name, destination):
         """Set the destination endpoints for a product"""
@@ -54,7 +44,11 @@ class SimulatorServer(katcp.DeviceServer):
             product = self.products[name]
         except KeyError:
             return 'fail', 'requested product name not found'
-        product.destination = endpoint.endpoint_list_parser(0)(destination)
+        endpoints = endpoint.endpoint_list_parser(None)(destination)
+        for e in endpoints:
+            if e.port is None:
+                return 'fail', 'no port specified'
+        product.destination = FXStreamSpead(endpoints)
         return 'ok',
 
     @request(Str(default=''))
@@ -65,9 +59,13 @@ class SimulatorServer(katcp.DeviceServer):
             return 'fail', 'requested product name not found'
         for name, product in self.products.items():
             if req_name == '' or req_name == name:
+                try:
+                    endpoints = product.destination.endpoints
+                except AttributeError:
+                    endpoints = [endpoint.Endpoint('0.0.0.0', 0)]
                 # TODO: Add a formatter to katsdptelstate.endpoint that
                 # reconstructs the a.b.c.d+N:port format.
-                sock.inform(','.join([str(x) for x in product.destination]))
+                sock.inform(','.join([str(x) for x in endpoints]))
         return 'ok',
 
     @request(Int())
@@ -78,12 +76,17 @@ class SimulatorServer(katcp.DeviceServer):
         self.subarray.sync_time = timestamp
         return 'ok',
 
-    @request(Float())
+    @request(Str(), Float())
     @return_reply()
-    def request_accumulation_length(self, sock, period):
-        """Set the accumulation interval"""
-        # TODO: apply rounding?
-        self.subarray.accumulation_length = period
+    def request_accumulation_length(self, sock, name, period):
+        """Set the accumulation interval for a product.
+
+        Note: this differs from the CAM-CBF ICD, in which this is subarray-wide."""
+        try:
+            product = self.products[name]
+        except KeyError:
+            return 'fail', 'requested product name not found'
+        product.accumulation_length = period
         return 'ok',
 
     @request(Str(), Float())
@@ -137,8 +140,6 @@ class SimulatorServer(katcp.DeviceServer):
             product = self.products[stream]
         except KeyError:
             return 'fail', 'requested product name not found'
-        if not product.active:
-            return 'fail', 'requested product has not been activated'
         product.capture_start()
         return 'ok',
 
