@@ -39,6 +39,7 @@ def wait_until(future, when, loop=None):
 class Subarray(object):
     def __init__(self):
         self.antennas = []
+        self.sources = []
         self.sync_time = time.time()
         self.accumulation_length = 0.5
 
@@ -64,7 +65,7 @@ class Product(object):
         return self._active
 
     def activate(self):
-        assert not self.active
+        assert not self._active
         # Freeze the subarray so that we're not affected by changes on the
         # master copy
         self.subarray = copy.deepcopy(self.subarray)

@@ -2,6 +2,7 @@ from __future__ import print_function, division
 import trollius
 from trollius import From
 import katcp
+import katpoint
 import tornado
 import logging
 from katcp.kattypes import Str, Float, Int, Address, request, return_reply
@@ -101,10 +102,7 @@ class SimulatorServer(katcp.DeviceServer):
     @request(Str())
     @return_reply()
     def request_antenna_add(self, sock, antenna_str):
-        """Add an antenna to the simulated array, in the format accepted by katpoint.
-
-        All calls to this request must be performed before starting any correlators.
-        """
+        """Add an antenna to the simulated array, in the format accepted by katpoint."""
         self.subarray.antennas.append(katpoint.Antenna(antenna_str))
         return 'ok',
 
@@ -114,6 +112,21 @@ class SimulatorServer(katcp.DeviceServer):
         """Report all the antennas in the simulated array"""
         for antenna in self.subarray.antennas:
             sock.inform(antenna.description)
+        return 'ok',
+
+    @request(Str())
+    @return_reply()
+    def request_source_add(self, sock, source_str):
+        """Add a source to the sky model, in the format accepted by katpoint."""
+        self.subarray.sources.append(katpoint.Target(source_str))
+        return 'ok',
+
+    @request()
+    @return_reply()
+    def request_source_list(self, sock):
+        """List the sources in the sky model."""
+        for source in self.subarray.sources:
+            sock.inform(source.description)
         return 'ok',
 
     @request(Str())
