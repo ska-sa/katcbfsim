@@ -8,7 +8,7 @@ import logging
 from katcp.kattypes import Str, Float, Int, Address, request, return_reply
 from katsdptelstate import endpoint
 from .product import Subarray, FXProduct
-from .stream import FXStreamSpead
+from .stream import FXStreamSpeadFactory
 
 
 logger = logging.getLogger(__name__)
@@ -49,7 +49,7 @@ class SimulatorServer(katcp.DeviceServer):
         for e in endpoints:
             if e.port is None:
                 return 'fail', 'no port specified'
-        product.destination = FXStreamSpead(endpoints)
+        product.destination_factory = FXStreamSpeadFactory(endpoints)
         return 'ok',
 
     @request(Str(default=''))

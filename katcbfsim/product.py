@@ -2,6 +2,7 @@ from __future__ import print_function, division
 import trollius
 import logging
 import time
+import collections
 from trollius import From
 from katsdptelstate import endpoint
 from . import rime
@@ -36,6 +37,52 @@ def wait_until(future, when, loop=None):
         timeout_handle.cancel()
 
 
+class ResourceAllocation(object):
+    def __init__(self, start, end, value):
+        self._start = start
+        self._end = end
+        self.value = value
+
+    def wait(self):
+        return self._start
+
+    def ready(self, events=None):
+        if events is None:
+            events = []
+        self._end.set_result(events)
+
+    def __enter__(self):
+        return self.value
+
+    def __exit__(self, exc_type, exc_value, exc_tb):
+        if not self._end.done():
+            if exc_type is not None:
+                self._end.cancel()
+            else:
+                logger.warn('Resource allocation was not explicitly made ready')
+                self.ready()
+
+
+class Resource(object):
+    """Abstraction of a contended resource, which may exist on a device.
+
+    Passing of ownership is done via futures. Acquiring a resource is a
+    non-blocking operation that returns two futures: a future to wait for
+    before use, and a future to be signalled with a result when done. The
+    value of each of these futures is a (possibly empty) list of device
+    events which must be waited on before more device work is scheduled.
+    """
+    def __init__(self, value):
+        self._future = trollius.Future()
+        self._future.set_result([])
+        self.value = value
+
+    def acquire(self):
+        old = self._future
+        self._future = trollius.Future()
+        return ResourceAllocation(old, self._future, self.value)
+
+
 class Subarray(object):
     def __init__(self):
         self.antennas = []
@@ -56,11 +103,12 @@ class FXProduct(object):
         self.context = context
         self.name = name
         self.subarray = subarray
-        self.destination = None
+        self.destination_factory = None
         self.bandwidth = bandwidth
         self.channels = channels
         self.center_frequency = 1412000000
         self.accumulation_length = 0.5
+        self.time_scale = 1.0
         self._active = False
         self._capture_future = None
         self._stop_future = None
@@ -68,6 +116,10 @@ class FXProduct(object):
             self._loop = trollius.get_event_loop()
         else:
             self._loop = loop
+
+    @property
+    def wall_accumulation_length(self):
+        return self.time_scale * self.accumulation_length
 
     @property
     def capturing(self):
@@ -112,19 +164,85 @@ class FXProduct(object):
         return predict
 
     @trollius.coroutine
-    def _capture(self):
+    def _run_dump(self, index, predict_a, data_a, host_a, stream_a, io_queue_a):
         try:
+            with predict_a as predict, data_a as data, host_a as host, \
+                    stream_a as stream, io_queue_a as io_queue:
+                # Prepare the predictor object.
+                # No need to wait for events on predict, because the object has its own
+                # command queue to serialise use.
+                yield From(predict_a.wait())
+                predict.bind(out=data)
+                # TODO: set time, pointing
+
+                # Execute the predictor, updating data
+                logger.debug('Dump %d: waiting for device memory event', index)
+                events = yield From(data_a.wait())
+                logger.debug('Dump %d: device memory wait queued', index)
+                predict.command_queue.enqueue_wait_for_events(events)
+                predict()
+                predict.command_queue.flush()
+                predict_a.ready()   # Predict object can be reused now
+                logger.debug('Dump %d: operation enqueued, waiting for host memory', index)
+
+                # Transfer the data back to the host
+                yield From(io_queue_a.wait()) # Just to ensure ordering - no data hazards
+                yield From(host_a.wait())
+                data.get_async(io_queue, host)
+                io_queue.flush()
+                logger.debug('Dump %d: transfer to host queued', index)
+                transfer_event = io_queue.enqueue_marker()
+                data_a.ready([transfer_event])
+                io_queue_a.ready()
+                # Wait for the transfer to complete
+                yield From(self._loop.run_in_executor(None, transfer_event.wait))
+                logger.debug('Dump %d: transfer to host complete, waiting for stream', index)
+
+                # Send the data
+                yield From(stream_a.wait())        # Just to ensure ordering
+                logger.debug('Dump %d: starting transmission', index)
+                yield From(stream.send(host))
+                host_a.ready()
+                stream_a.ready()
+                logger.debug('Dump %d: complete', index)
+        except Exception:
+            logging.error('Dump %d: exception', index, exc_info=True)
+
+    @trollius.coroutine
+    def _capture(self):
+        dump_futures = collections.deque()
+        try:
+            n_antennas = len(self.subarray.antennas)
+            destination = self.destination_factory(n_antennas, self.channels, self.wall_accumulation_length)
             predict = yield From(self._loop.run_in_executor(None, self._make_predict))
             wall_time = self._loop.time()
             index = 0
+            predict_r = Resource(predict)
+            io_queue_r = Resource(self.context.create_command_queue())
+            # TODO: have two data resources for overlapped I/O
+            data_r = Resource(predict.buffer('out'))
+            host_r = Resource(data_r.value.empty_like())
+            stream_r = Resource(destination)
             while True:
-                # TODO: set time and pointing for prediction
-                predict()
-                predict.command_queue.finish()
-                logging.info('Prepared dump %d', index)
-                # Sleep until either it is time to make the dump, or we are asked
+                predict_a = predict_r.acquire()
+                data_a = data_r.acquire()
+                host_a = host_r.acquire()
+                stream_a = stream_r.acquire()
+                io_queue_a = io_queue_r.acquire()
+                # Don't start the dump coroutine until the predictor is ready.
+                # This ensures that if dumps can't keep up with the rate, then
+                # we will block here rather than building an ever-growing set
+                # of active coroutines.
+                logger.debug('Dump %d: waiting for predictor', index)
+                yield From(predict_a.wait())
+                logger.debug('Dump %d: predictor ready', index)
+                future = trollius.async(
+                    self._run_dump(index, predict_a, data_a, host_a, stream_a, io_queue_a),
+                    loop=self._loop)
+                dump_futures.append(future)
+                # Sleep until either it is time to make the next dump, or we are asked
                 # to stop.
-                wall_time += self.accumulation_length
+                wall_time += self.wall_accumulation_length
                 try:
                     # TODO: support alternative rate of time
                     yield From(wait_until(trollius.shield(self._stop_future), wall_time, self._loop))
@@ -134,8 +252,14 @@ class FXProduct(object):
                 else:
                     # The _stop_future was triggered
                     break
-                # TODO: emit the visibilities
+                # Reap any previously completed coroutines
+                while dump_futures and dump_futures[0].done():
+                    dump_futures[0].result()  # Re-throws exceptions here
+                    dump_futures.popleft()
                 index += 1
             logging.info('Capture stopped by request')
         except Exception:
             logger.error('Exception in capture coroutine', exc_info=True)
+            for future in dump_futures:
+                if not future.done():
+                    future.cancel()
