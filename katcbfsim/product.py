@@ -5,6 +5,7 @@ import time
 import collections
 from trollius import From
 from katsdptelstate import endpoint
+from katsdpsigproc import accel
 from . import rime
 
 
@@ -181,6 +182,7 @@ class FXProduct(object):
                 logger.debug('Dump %d: device memory wait queued', index)
                 predict.command_queue.enqueue_wait_for_events(events)
                 predict()
+                compute_event = predict.command_queue.enqueue_marker()
                 predict.command_queue.flush()
                 predict_a.ready()   # Predict object can be reused now
                 logger.debug('Dump %d: operation enqueued, waiting for host memory', index)
@@ -188,6 +190,7 @@ class FXProduct(object):
                 # Transfer the data back to the host
                 yield From(io_queue_a.wait()) # Just to ensure ordering - no data hazards
                 yield From(host_a.wait())
+                io_queue.enqueue_wait_for_events([compute_event])
                 data.get_async(io_queue, host)
                 io_queue.flush()
                 logger.debug('Dump %d: transfer to host queued', index)
@@ -220,13 +223,15 @@ class FXProduct(object):
             predict_r = Resource(predict)
             io_queue_r = Resource(self.context.create_command_queue())
             # TODO: have two data resources for overlapped I/O
-            data_r = Resource(predict.buffer('out'))
-            host_r = Resource(data_r.value.empty_like())
+            data = predict.buffer('out')
+            data_r = [Resource(data)]
+            data_r.append(Resource(accel.DeviceArray(self.context, data.shape, data.dtype, data.padded_shape)))
+            host_r = [Resource(x.value.empty_like()) for x in data_r]
             stream_r = Resource(destination)
             while True:
                 predict_a = predict_r.acquire()
-                data_a = data_r.acquire()
-                host_a = host_r.acquire()
+                data_a = data_r[index % len(data_r)].acquire()
+                host_a = host_r[index % len(host_r)].acquire()
                 stream_a = stream_r.acquire()
                 io_queue_a = io_queue_r.acquire()
                 # Don't start the dump coroutine until the predictor is ready.
