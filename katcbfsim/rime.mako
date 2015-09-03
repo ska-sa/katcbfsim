@@ -15,11 +15,6 @@ typedef struct
     cplex m[2][2];
 } jones;
 
-typedef struct
-{
-    float m[2][2];
-} rjones;
-
 // Compute a * b
 DEVICE_FN cplex cmul(cplex a, cplex b)
 {
@@ -111,16 +106,6 @@ DEVICE_FN jones scalar_jones_mul(cplex a, jones b)
     return out;
 }
 
-// Compute a * b
-DEVICE_FN jones scalar_rjones_mul(cplex a, rjones b)
-{
-    jones out;
-    for (int i = 0; i < 2; i++)
-        for (int j = 0; j < 2; j++)
-            out.m[i][j] = cmul_real(b.m[i][j], a);
-    return out;
-}
-
 /**
  * Compute predicted visibilities. The work division is that axis 0 selects the
  * baseline, axis 1 selects the frequency, and each workgroup must only handle
@@ -144,7 +129,7 @@ DEVICE_FN jones scalar_rjones_mul(cplex a, rjones b)
 KERNEL void predict(
     GLOBAL jones * RESTRICT out,
     int out_stride,
-    const GLOBAL rjones * RESTRICT flux,
+    const GLOBAL jones * RESTRICT flux,
     int flux_stride,
     const GLOBAL jones * RESTRICT gain,
     int gain_stride,
@@ -161,6 +146,7 @@ KERNEL void predict(
     int b = get_global_id(0);
     int f = get_global_id(1);
     short2 pq = baselines[b];
+    float inv_wavelength_private = inv_wavelength[f];
     int p = pq.x;
     int q = pq.y;
     int lid = get_local_id(0);
@@ -170,10 +156,10 @@ KERNEL void predict(
         if (lid < n_antennas)
         {
             int idx = source * n_antennas + lid;
-            float ph = scaled_phase[idx] * inv_wavelength[f];
+            float ph = scaled_phase[idx] * inv_wavelength_private;
             cplex k_private = exp_pi_i(ph);
             k[lid] = k_private;
-            kb[lid] = scalar_rjones_mul(k_private, flux[f * flux_stride + source]);
+            kb[lid] = scalar_jones_mul(k_private, flux[f * flux_stride + source]);
         }
         BARRIER(); // TODO: could batch several sources, to reduce barrier costs
         jones kbk = scalar_jones_mul(k[q], kb[p]);
