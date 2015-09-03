@@ -1,10 +1,10 @@
 from __future__ import print_function, division
 import trollius
-import copy
 import logging
 import time
 from trollius import From
 from katsdptelstate import endpoint
+from . import rime
 
 
 logger = logging.getLogger(__name__)
@@ -42,9 +42,18 @@ class Subarray(object):
         self.sources = []
         self.sync_time = time.time()
 
+    def clone(self):
+        # copy.deepcopy doesn't work on Antenna objects
+        other = Subarray()
+        other.antennas = list(self.antennas)
+        other.sources = list(self.sources)
+        other.sync_time = self.sync_time
+        return other
+
 
 class FXProduct(object):
-    def __init__(self, subarray, name, bandwidth, channels, loop=None):
+    def __init__(self, context, subarray, name, bandwidth, channels, loop=None):
+        self.context = context
         self.name = name
         self.subarray = subarray
         self.destination = None
@@ -68,9 +77,13 @@ class FXProduct(object):
         if self.capturing:
             logger.warn('Ignoring attempt to start capture when already running')
             return
+        if not self.subarray.antennas:
+            raise ValueError('No antennas defined')
+        if not self.subarray.sources:
+            raise ValueError('No sources defined')
         # Freeze the subarray so that we're not affected by changes on the
         # master copy
-        self.subarray = copy.deepcopy(self.subarray)
+        self.subarray = self.subarray.clone()
         # Create a future that is set by capture_stop
         self._stop_future = trollius.Future(loop=self._loop)
         # Start the capture coroutine on the event loop
@@ -86,13 +99,28 @@ class FXProduct(object):
         self._stop_future = None
         self._capture_future = None
 
+    def _make_predict(self):
+        """Compiles the kernel, allocates memory etc. This is potentially slow,
+        so it is run in a separate thread to avoid blocking asyncio.
+        """
+        queue = self.context.create_command_queue()
+        template = rime.RimeTemplate(self.context, len(self.subarray.antennas))
+        predict = template.instantiate(
+            queue, self.center_frequency, self.bandwidth,
+            self.channels, self.subarray.sources, self.subarray.antennas)
+        predict.ensure_all_bound()
+        return predict
+
     @trollius.coroutine
     def _capture(self):
         try:
+            predict = yield From(self._loop.run_in_executor(None, self._make_predict))
             wall_time = self._loop.time()
             index = 0
             while True:
-                # TODO: compute visibilities
+                # TODO: set time and pointing for prediction
+                predict()
+                predict.command_queue.finish()
                 logging.info('Prepared dump %d', index)
                 # Sleep until either it is time to make the dump, or we are asked
                 # to stop.

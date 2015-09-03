@@ -19,8 +19,9 @@ class SimulatorServer(katcp.DeviceServer):
     VERSION_INFO = ('katcbfsim-api', 1, 0)
     BUILD_INFO = ('katcbfsim', 0, 1, '')
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, context, *args, **kwargs):
         super(SimulatorServer, self).__init__(*args, **kwargs)
+        self.context = context
         self.products = {}
         self.subarray = Subarray()
 
@@ -33,7 +34,7 @@ class SimulatorServer(katcp.DeviceServer):
         """Create a new simulated correlator productt"""
         if name in self.products:
             return 'fail', 'product {} already exists'.format(name)
-        self.products[name] = FXProduct(self.subarray, name, bandwidth, channels)
+        self.products[name] = FXProduct(self.context, self.subarray, name, bandwidth, channels)
         return 'ok',
 
     @request(Str(), Str())

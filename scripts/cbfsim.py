@@ -9,6 +9,7 @@ import signal
 import argparse
 import logging
 import katcbfsim.server
+from katsdpsigproc import accel
 
 
 @tornado.gen.coroutine
@@ -24,9 +25,10 @@ def main():
     args = parser.parse_args()
     logging.basicConfig(level=logging.DEBUG)
 
+    context = accel.create_some_context(interactive=False)
     ioloop = AsyncIOMainLoop()
     ioloop.install()
-    server = katcbfsim.server.SimulatorServer(args.host, args.port)
+    server = katcbfsim.server.SimulatorServer(context, args.host, args.port)
     server.set_concurrency_options(thread_safe=False, handler_thread=False)
     server.set_ioloop(ioloop)
     signal.signal(signal.SIGINT, lambda sig, frame: ioloop.add_callback_from_signal(
