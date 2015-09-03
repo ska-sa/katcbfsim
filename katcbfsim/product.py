@@ -98,6 +98,7 @@ class FXProduct(object):
                 # to stop.
                 wall_time += self.accumulation_length
                 try:
+                    # TODO: support alternative rate of time
                     yield From(wait_until(trollius.shield(self._stop_future), wall_time, self._loop))
                 except trollius.TimeoutError:
                     # This is the normal case: time for the next dump to be transmitted
