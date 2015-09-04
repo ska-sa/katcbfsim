@@ -155,6 +155,15 @@ class FXProduct(object):
     def _make_predict(self):
         """Compiles the kernel, allocates memory etc. This is potentially slow,
         so it is run in a separate thread to avoid blocking asyncio.
+
+        Returns
+        -------
+        predict : :class:`~katcbfsim.rime.Rime`
+            Visibility predictor
+        data : list of :class:`~katsdpsigproc.accel.DeviceArray`
+            Device storage for visibilities
+        host : list of :class:`~katsdpsigproc.accel.HostArray`
+            Pinned memory for transfers to the host
         """
         queue = self.context.create_command_queue()
         template = rime.RimeTemplate(self.context, len(self.subarray.antennas))
@@ -162,7 +171,10 @@ class FXProduct(object):
             queue, self.center_frequency, self.bandwidth,
             self.channels, self.subarray.sources, self.subarray.antennas)
         predict.ensure_all_bound()
-        return predict
+        data = [predict.buffer('out')]
+        data.append(accel.DeviceArray(self.context, data[0].shape, data[0].dtype, data[0].padded_shape))
+        host = [x.empty_like() for x in data]
+        return predict, data, host
 
     @trollius.coroutine
     def _run_dump(self, index, predict_a, data_a, host_a, stream_a, io_queue_a):
@@ -217,17 +229,14 @@ class FXProduct(object):
         try:
             n_antennas = len(self.subarray.antennas)
             destination = self.destination_factory(n_antennas, self.channels, self.wall_accumulation_length)
-            predict = yield From(self._loop.run_in_executor(None, self._make_predict))
-            wall_time = self._loop.time()
+            predict, data, host = yield From(self._loop.run_in_executor(None, self._make_predict))
             index = 0
             predict_r = Resource(predict)
             io_queue_r = Resource(self.context.create_command_queue())
-            # TODO: have two data resources for overlapped I/O
-            data = predict.buffer('out')
-            data_r = [Resource(data)]
-            data_r.append(Resource(accel.DeviceArray(self.context, data.shape, data.dtype, data.padded_shape)))
-            host_r = [Resource(x.value.empty_like()) for x in data_r]
+            data_r = [Resource(x) for x in data]
+            host_r = [Resource(x) for x in host]
             stream_r = Resource(destination)
+            wall_time = self._loop.time()
             while True:
                 predict_a = predict_r.acquire()
                 data_a = data_r[index % len(data_r)].acquire()
