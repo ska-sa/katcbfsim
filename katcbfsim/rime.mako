@@ -49,7 +49,12 @@ DEVICE_FN cplex cconj(cplex a)
 DEVICE_FN cplex exp_pi_i(float phase)
 {
     float s, c;
+#ifdef __OPENCL_VERSION__
+    s = sinpi(phase);
+    c = cospi(phase);
+#else
     sincospi(phase, &s, &c);
+#endif
     return make_float2(c, s);
 }
 
