@@ -226,9 +226,10 @@ class FXProduct(object):
     @trollius.coroutine
     def _capture(self):
         dump_futures = collections.deque()
+        destination = None
         try:
-            n_antennas = len(self.subarray.antennas)
-            destination = self.destination_factory(n_antennas, self.channels, self.wall_accumulation_length)
+            destination = self.destination_factory(self)
+            yield From(destination.send_metadata())
             predict, data, host = yield From(self._loop.run_in_executor(None, self._make_predict))
             index = 0
             predict_r = Resource(predict)
@@ -272,6 +273,7 @@ class FXProduct(object):
                     dump_futures.popleft()
                 index += 1
             logging.info('Capture stopped by request')
+            yield From(destination.close())
         except Exception:
             logger.error('Exception in capture coroutine', exc_info=True)
             for future in dump_futures:
