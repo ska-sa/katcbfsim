@@ -347,6 +347,10 @@ class FXProduct(object):
             queue, self.center_frequency, self.bandwidth,
             self.channels, self.subarray.sources, self.subarray.antennas)
         predict.ensure_all_bound()
+        # Initialise gains. Eventually this will need to be more sophisticated.
+        gain_host = predict.buffer('gain').empty_like()
+        gain_host.fill(1)
+        predict.buffer('gain').set(predict.command_queue, gain_host)
         data = [predict.buffer('out')]
         data.append(accel.DeviceArray(self.context, data[0].shape, data[0].dtype, data[0].padded_shape))
         host = [x.empty_like() for x in data]
