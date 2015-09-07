@@ -132,7 +132,7 @@ class FXStreamSpead(object):
         yield From(self._stream.async_send_heap(heap))
 
     @trollius.coroutine
-    def close():
+    def close(self):
         # This is to ensure that the end packet won't be dropped for lack of
         # space in the sending buffer. In normal use it won't do anything
         # because we always asynchronously wait for transmission, but in an

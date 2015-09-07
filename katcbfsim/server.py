@@ -5,13 +5,42 @@ import katcp
 import katpoint
 import tornado
 import logging
+import functools
 from katcp.kattypes import Str, Float, Int, Address, request, return_reply
 from katsdptelstate import endpoint
+from . import product
 from .product import Subarray, FXProduct
 from .stream import FXStreamSpeadFactory
 
 
 logger = logging.getLogger(__name__)
+
+
+def _product_request(wrapped):
+    """Decorator for per-product commands. It looks up the product and passes
+    it to the wrapped function, or returns a failure message if it does not
+    exist.
+    """
+    def wrapper(self, sock, name, *args, **kwargs):
+        try:
+            product = self.products[name]
+        except KeyError:
+            return 'fail', 'requested product name not found'
+        return wrapped(self, sock, product, *args, **kwargs)
+    functools.update_wrapper(wrapper, wrapped)
+    return wrapper
+
+def _product_exceptions(wrapped):
+    """Decorator used on requests that and turns exceptions defined in
+    :py:mod:`product` into katcp "fail" messages.
+    """
+    def wrapper(*args, **kwargs):
+        try:
+            return wrapped(*args, **kwargs)
+        except (product.CaptureInProgressError, product.IncompleteConfigError) as e:
+            return 'fail', str(e)
+    functools.update_wrapper(wrapper, wrapped)
+    return wrapper
 
 
 class SimulatorServer(katcp.DeviceServer):
@@ -31,7 +60,7 @@ class SimulatorServer(katcp.DeviceServer):
     @request(Str(), Int(), Int())
     @return_reply()
     def request_product_create_correlator(self, sock, name, bandwidth, channels):
-        """Create a new simulated correlator productt"""
+        """Create a new simulated correlator product"""
         if name in self.products:
             return 'fail', 'product {} already exists'.format(name)
         self.products[name] = FXProduct(self.context, self.subarray, name, bandwidth, channels)
@@ -39,18 +68,14 @@ class SimulatorServer(katcp.DeviceServer):
 
     @request(Str(), Str())
     @return_reply()
-    def request_capture_destination(self, sock, name, destination):
+    @_product_exceptions
+    @_product_request
+    def request_capture_destination(self, sock, product, destination):
         """Set the destination endpoints for a product"""
-        try:
-            product = self.products[name]
-        except KeyError:
-            return 'fail', 'requested product name not found'
         endpoints = endpoint.endpoint_list_parser(None)(destination)
         for e in endpoints:
             if e.port is None:
                 return 'fail', 'no port specified'
-        if product.capturing:
-            return 'fail', 'cannot change destination while capture is in progress'
         product.destination_factory = FXStreamSpeadFactory(endpoints)
         return 'ok',
 
@@ -73,6 +98,7 @@ class SimulatorServer(katcp.DeviceServer):
 
     @request(Int())
     @return_reply()
+    @_product_exceptions
     def request_sync_time(self, sock, timestamp):
         """Set the sync time, as seconds since the UNIX epoch. This will also
         be the timestamp associated with the first data dump."""
@@ -80,17 +106,13 @@ class SimulatorServer(katcp.DeviceServer):
         return 'ok',
 
     @request(Str(), Float())
-    @return_reply()
-    def request_accumulation_length(self, sock, name, period):
+    @return_reply(Float())
+    @_product_exceptions
+    @_product_request
+    def request_accumulation_length(self, sock, product, period):
         """Set the accumulation interval for a product.
 
         Note: this differs from the CAM-CBF ICD, in which this is subarray-wide."""
-        try:
-            product = self.products[name]
-        except KeyError:
-            return 'fail', 'requested product name not found'
-        if product.capturing:
-            return 'fail', 'cannot set accumulation length while capture is in progress'
         product.accumulation_length = period
         # accumulation_length is a property, and the setter rounds the value.
         # We are thus returning the rounded value.
@@ -98,24 +120,21 @@ class SimulatorServer(katcp.DeviceServer):
 
     @request(Str(), Float())
     @return_reply()
-    def request_frequency_select(self, sock, name, frequency):
+    @_product_exceptions
+    @_product_request
+    def request_frequency_select(self, sock, product, frequency):
         """Set the center frequency for the band. Unlike the real CBF, an
         arbitrary frequency may be selected, and it will not be rounded.
         """
-        try:
-            product = self.products[name]
-        except KeyError:
-            return 'fail', 'requested product name not found'
-        if product.capturing:
-            return 'fail', 'cannot set center frequency while capture is in progress'
-        product.center_frequency = center_frequency
+        product.center_frequency = frequency
         return 'ok',
 
     @request(Str())
     @return_reply()
+    @_product_exceptions
     def request_antenna_add(self, sock, antenna_str):
         """Add an antenna to the simulated array, in the format accepted by katpoint."""
-        self.subarray.antennas.append(katpoint.Antenna(antenna_str))
+        self.subarray.add_antenna(katpoint.Antenna(antenna_str))
         return 'ok',
 
     @request()
@@ -128,9 +147,10 @@ class SimulatorServer(katcp.DeviceServer):
 
     @request(Str())
     @return_reply()
+    @_product_exceptions
     def request_source_add(self, sock, source_str):
         """Add a source to the sky model, in the format accepted by katpoint."""
-        self.subarray.sources.append(katpoint.Target(source_str))
+        self.subarray.add_source(katpoint.Target(source_str))
         return 'ok',
 
     @request()
@@ -143,22 +163,20 @@ class SimulatorServer(katcp.DeviceServer):
 
     @request(Str())
     @return_reply()
-    def request_capture_start(self, sock, stream):
+    @_product_exceptions
+    @_product_request
+    def request_capture_start(self, sock, product):
         """Start the flow of data for a product"""
-        try:
-            product = self.products[stream]
-        except KeyError:
-            return 'fail', 'requested product name not found'
         product.capture_start()
         return 'ok',
 
     @request(Str())
     @return_reply()
     @tornado.gen.coroutine
-    def request_capture_stop(self, sock, stream):
+    def request_capture_stop(self, sock, name):
         """Stop the flow of data for a product"""
         try:
-            product = self.products[stream]
+            product = self.products[name]
         except KeyError:
             raise tornado.gen.Return(('fail', 'requested product name not found'))
         stop = trollius.async(product.capture_stop())
