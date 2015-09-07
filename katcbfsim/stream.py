@@ -88,6 +88,18 @@ class FXStreamSpead(object):
             (), np.float64, value=self.product.bandwidth / self.product.channels)
         ig.add_item(0x1048, 'xeng_out_bits_per_sample', 'The number of bits per value of the xeng accumulator output. Note this is for a single component value, not the combined complex size.',
             (), None, format=inline_fmt, value=32)
+
+        baselines = []
+        for i in range(n_antennas):
+            for j in range(i, n_antennas):
+                for pol1 in ('v', 'h'):
+                    for pol2 in ('v', 'h'):
+                        name1 = self.product.subarray.antennas[i].name + pol1
+                        name2 = self.product.subarray.antennas[j].name + pol2
+                        baselines.append([name1, name2])
+        baselines = np.array(baselines)
+        ig.add_item(0x100C, 'bls_ordering', "The X-engine baseline output ordering. The form is a list of arrays of strings of user-defined antenna names ('input1','input2'). For example [('antC23x','antC23y'), ('antB12y','antA29y')]",
+            baselines.shape, baselines.dtype, value=baselines)
         return ig
 
     def _make_data_ig(self):

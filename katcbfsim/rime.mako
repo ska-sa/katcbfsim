@@ -12,7 +12,7 @@ typedef float2 cplex;
 
 typedef struct
 {
-    cplex m[2][2];
+    cplex m[2][2]; // row-major order
 } jones;
 
 // Compute a * b
