@@ -123,6 +123,25 @@ class FXProduct(object):
         return self.time_scale * self.accumulation_length
 
     @property
+    def accumulation_length(self):
+        """Integration time in seconds. This is a property: setting the value
+        will round it to the nearest supported value.
+        """
+        return self._accumulation_length
+
+    @accumulation_length.setter
+    def accumulation_length(self, value):
+        """Round the accumulation length in the same way the real correlator
+        would. It requires a multiple of 256 accumulations."""
+        snap_length = self.channels / self.bandwidth
+        self._n_accs = int(round(value / snap_length / 256)) * 256
+        self._accumulation_length = snap_length * self.n_accs
+
+    @property
+    def n_accs(self):
+        return self._n_accs
+
+    @property
     def capturing(self):
         return self._capture_future is not None
 
@@ -186,7 +205,9 @@ class FXProduct(object):
                 # command queue to serialise use.
                 yield From(predict_a.wait())
                 predict.bind(out=data)
-                # TODO: set time, pointing
+                # Set the timestamp for the center of the integration period
+                predict.set_time(self.subarray.sync_time + (index + 0.5) * self.accumulation_length)
+                # TODO: set pointing
 
                 # Execute the predictor, updating data
                 logger.debug('Dump %d: waiting for device memory event', index)
@@ -216,7 +237,7 @@ class FXProduct(object):
                 # Send the data
                 yield From(stream_a.wait())        # Just to ensure ordering
                 logger.debug('Dump %d: starting transmission', index)
-                yield From(stream.send(host))
+                yield From(stream.send(host, index))
                 host_a.ready()
                 stream_a.ready()
                 logger.debug('Dump %d: complete', index)

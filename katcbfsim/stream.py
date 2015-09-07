@@ -57,7 +57,6 @@ class FXStreamSpead(object):
         inline_fmt = [('u', self._flavour.heap_address_bits)]
         n_antennas = len(self.product.subarray.antennas)
         n_baselines = n_antennas * (n_antennas + 1) // 2
-        n_accs = 0  # TODO!
         ig.add_item(0x1007, 'adc_sample_rate', 'Expected ADC sample rate (sampled/second)',
             (), np.uint64, value=self.product.bandwidth * 2)
         ig.add_item(0x1008, 'n_bls', 'The total number of baselines in the data product. Each pair of inputs (polarisation pairs) is considered a baseline.',
@@ -73,7 +72,7 @@ class FXStreamSpead(object):
         ig.add_item(0x1013, 'bandwidth', 'The analogue bandwidth of the digitally processed signal in Hz.',
             (), np.float64, value=np.float64(self.product.bandwidth))
         ig.add_item(0x1015, 'n_accs', 'The number of spectra that are accumulated per integration.',
-            (), None, format=inline_fmt, value=n_accs)
+            (), None, format=inline_fmt, value=self.product.n_accs)
         ig.add_item(0x1016, 'int_time', "Approximate (it's a float!) time per accumulation in seconds. This is intended for reference only. Each accumulation has an associated timestamp which should be used to determine the time of the integration rather than incrementing the start time by this value for sequential integrations (which would allow errors to grow).",
             (), np.float64, value=self.product.accumulation_length)
         ig.add_item(0x1022, 'rx_udp_port', 'Destination UDP port for data output.',
@@ -82,11 +81,11 @@ class FXStreamSpead(object):
         ig.add_item(0x1024, 'rx_udp_ip_str', 'Destination IP address for output UDP packets.',
             (None,), None, format=[('c', 8)], value=self.endpoint.host)
         ig.add_item(0x1027, 'sync_time', 'Time at which the system was last synchronised (armed and triggered by a 1PPS) in seconds since the Unix Epoch.',
-            (), None, format=inline_fmt, value=self.product.subarray.sync_time)
+            (), None, format=inline_fmt, value=self.product.subarray.sync_time.secs)
         # TODO: do we need ddc_mix_freq, adc_bits?
         # TODO: what scaling factor should we use?
         ig.add_item(0x1046, 'scale_factor_timestamp', 'Timestamp scaling factor. Divide the SPEAD data packet timestamp by this number to get back to seconds since last sync.',
-            (), np.float64, value=self.product.bandwidth * 2)
+            (), np.float64, value=self.product.bandwidth / self.product.channels)
         ig.add_item(0x1048, 'xeng_out_bits_per_sample', 'The number of bits per value of the xeng accumulator output. Note this is for a single component value, not the combined complex size.',
             (), None, format=inline_fmt, value=32)
         return ig
@@ -122,11 +121,11 @@ class FXStreamSpead(object):
         yield From(self._stream.async_send_heap(heap))
 
     @trollius.coroutine
-    def send(self, vis):
+    def send(self, vis, dump_index):
         assert vis.flags.c_contiguous, 'Visibility array must be contiguous'
         vis_view = vis.view(np.int32).reshape(self._data_ig['xeng_raw'].shape)
         self._data_ig['xeng_raw'].value = vis_view
-        self._data_ig['timestamp'].value = 0  # TODO: make a parameter, work out scaling
+        self._data_ig['timestamp'].value = dump_index * self.product.n_accs
         heap = self._next_heap()
         for item in self._data_ig.values():
             heap.add_item(item)

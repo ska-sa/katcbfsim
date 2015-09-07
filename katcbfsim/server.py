@@ -49,6 +49,8 @@ class SimulatorServer(katcp.DeviceServer):
         for e in endpoints:
             if e.port is None:
                 return 'fail', 'no port specified'
+        if product.capturing:
+            return 'fail', 'cannot change destination while capture is in progress'
         product.destination_factory = FXStreamSpeadFactory(endpoints)
         return 'ok',
 
@@ -74,7 +76,7 @@ class SimulatorServer(katcp.DeviceServer):
     def request_sync_time(self, sock, timestamp):
         """Set the sync time, as seconds since the UNIX epoch. This will also
         be the timestamp associated with the first data dump."""
-        self.subarray.sync_time = timestamp
+        self.subarray.sync_time = katpoint.Timestamp(timestamp)
         return 'ok',
 
     @request(Str(), Float())
@@ -87,8 +89,12 @@ class SimulatorServer(katcp.DeviceServer):
             product = self.products[name]
         except KeyError:
             return 'fail', 'requested product name not found'
+        if product.capturing:
+            return 'fail', 'cannot set accumulation length while capture is in progress'
         product.accumulation_length = period
-        return 'ok',
+        # accumulation_length is a property, and the setter rounds the value.
+        # We are thus returning the rounded value.
+        return 'ok', product.accumulation_length
 
     @request(Str(), Float())
     @return_reply()
@@ -100,6 +106,8 @@ class SimulatorServer(katcp.DeviceServer):
             product = self.products[name]
         except KeyError:
             return 'fail', 'requested product name not found'
+        if product.capturing:
+            return 'fail', 'cannot set center frequency while capture is in progress'
         product.center_frequency = center_frequency
         return 'ok',
 
