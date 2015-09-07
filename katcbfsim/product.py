@@ -116,6 +116,9 @@ class Subarray(object):
         The simulated sources. Only point sources are currently supported.
         The do not necessarily have to be radec targets, and the position
         and flux model can safely be changed on the fly.
+    target : :class:`katpoint.Target`
+        Target. This determines the phase center for the simulation (and
+        eventually the center for the beam model as well).
     sync_time : :class:`katpoint.Timestamp`
         Start time for the simulated capture. When set, it is truncated to a
         whole number of seconds.
