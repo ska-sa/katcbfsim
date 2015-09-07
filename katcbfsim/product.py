@@ -161,6 +161,8 @@ class Subarray(object):
         """
         if self.capturing:
             raise CaptureInProgressError('cannot add antennas while capture in progress')
+        if source.flux_model is None:
+            logging.warn('source has no flux model; it will be assumed to be 1 Jy')
         self.sources.append(source)
 
     @property

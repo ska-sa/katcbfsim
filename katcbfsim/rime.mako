@@ -122,7 +122,7 @@ DEVICE_FN jones scalar_jones_mul(cplex a, jones b)
  * with valid antenna indices in the padding positions.
  *
  * @param out             Output predicted visibilities, channel-major
- * @param flux            Jones matrices for point source apparent brightness, frequency-major
+ * @param flux_density    Jones matrices for point source apparent brightness, frequency-major
  * @param gain            Jones matrix per antenna, frequency-major
  * @param inv_wavelength  Inverse of wavelength per channel, in per-metre
  * @param scaled_phase    -2(ul + vm + w(n-1)) per antenna per source (source-major), in metres
@@ -134,7 +134,7 @@ DEVICE_FN jones scalar_jones_mul(cplex a, jones b)
 KERNEL void predict(
     GLOBAL jones * RESTRICT out,
     int out_stride,
-    const GLOBAL jones * RESTRICT flux,
+    const GLOBAL jones * RESTRICT flux_density,
     int flux_stride,
     const GLOBAL jones * RESTRICT gain,
     int gain_stride,
@@ -164,7 +164,7 @@ KERNEL void predict(
             float ph = scaled_phase[idx] * inv_wavelength_private;
             cplex k_private = exp_pi_i(ph);
             k[lid] = k_private;
-            kb[lid] = scalar_jones_mul(k_private, flux[f * flux_stride + source]);
+            kb[lid] = scalar_jones_mul(k_private, flux_density[f * flux_stride + source]);
         }
         BARRIER(); // TODO: could batch several sources, to reduce barrier costs
         jones kbk = scalar_jones_mul(k[q], kb[p]);

@@ -32,12 +32,11 @@ class RimeTemplate(object):
                     for i in range(n_antennas)]
         # The values are irrelevant, we just need the memory to be there.
         out = accel.DeviceArray(context, (n_channels, n_baselines, 2, 2), np.complex64)
-        flux = accel.DeviceArray(context, (n_channels, n_sources, 2, 2), np.float32)
         gain = accel.DeviceArray(context, (n_channels, n_antennas, 2, 2), np.complex64)
         def generate(wgs):
             fn = cls(context, max_antennas, dict(wgs=wgs)).instantiate(
                 queue, 1412000000.0, 856000000.0, n_channels, sources, antennas)
-            fn.bind(out=out, flux=flux, gain=gain)
+            fn.bind(out=out, gain=gain)
             return tune.make_measure(queue, fn)
         wgss = [x for x in [32, 64, 128, 256, 512, 1024] if x >= max_antennas]
         return tune.autotune(generate, wgs=wgss)
@@ -66,20 +65,21 @@ class Rime(accel.Operation):
         self.phase_center = katpoint.construct_radec_target(0, 0)
         _2 = accel.Dimension(2, exact=True)
         self.slots['out'] = accel.IOSlot((n_channels, n_baselines, _2, _2), np.complex64)
-        self.slots['flux'] = accel.IOSlot((n_channels, n_sources, _2, _2), np.float32)
         self.slots['gain'] = accel.IOSlot((n_channels, n_antennas, _2, _2), np.complex64)
         self.kernel = template.program.get_kernel('predict')
         # Set up the inverse wavelength lookup table
         self._inv_wavelength = accel.DeviceArray(command_queue.context, (n_channels,), np.float32)
         channel_width = bandwidth / n_channels
         min_frequency = center_frequency - bandwidth / 2
-        frequencies = np.arange(0.5, n_channels) * channel_width + min_frequency
+        self.frequencies = np.arange(0.5, n_channels) * channel_width + min_frequency
         inv_wavelength = self._inv_wavelength.empty_like()
-        inv_wavelength[:] = (frequencies / katpoint.lightspeed).astype(np.float32)
+        inv_wavelength[:] = (self.frequencies / katpoint.lightspeed).astype(np.float32)
         self._inv_wavelength.set(command_queue, inv_wavelength)
-        # Set up internal phase array
+        # Set up internal arrays
         self._scaled_phase = accel.DeviceArray(command_queue.context, (n_sources, n_antennas), np.float32)
         self._scaled_phase_host = self._scaled_phase.empty_like()
+        self._flux_density = accel.DeviceArray(command_queue.context, (n_channels, n_sources, 2, 2), np.complex64)
+        self._flux_density_host = self._flux_density.empty_like()
         # Set up the internal baseline mapping
         # TODO: this could live in the template
         self._baselines = accel.DeviceArray(command_queue.context, (n_padded_baselines, 2), np.int16)
@@ -112,8 +112,37 @@ class Rime(accel.Operation):
         """
         self.phase_center = direction
 
-    def _run(self):
-        # Compute the propagation delay phase for each source and antenna
+    def _update_flux_density(self):
+        """Set the per-channel flux density from the flux models of the
+        sources.
+
+        This performs an **asynchronous** transfer to the GPU, and the caller
+        must wait for it to complete before calling the function again.
+        """
+        for channel, freq in enumerate(self.frequencies):
+            freq_Mhz = freq / 1e6  # katpoint takes freq in MHz
+            for i, source in enumerate(self.sources):
+                if source.flux_model is None:
+                    fd = 1.0
+                else:
+                    fd = source.flux_model.flux_density(freq_MHz)
+                    # Assume zero emission outside the defined frequency range.
+                    if np.isnan(fd):
+                        fd = 0.0
+                # katpoint currently doesn't model polarised sources, so
+                # set up a diagonal brightness matrix
+                self._flux_density_host[channel, i, 0, 0] = fd
+                self._flux_density_host[channel, i, 0, 1] = 0.0
+                self._flux_density_host[channel, i, 1, 0] = 0.0
+                self._flux_density_host[channel, i, 1, 1] = fd
+        self._flux_density.set_async(self.command_queue, self._flux_density_host)
+
+    def _update_scaled_phase(self):
+        """Compute the propagation delay phase for each source and antenna.
+
+        This performs an **asynchronous** transfer to the GPU, and the caller
+        must wait for it to complete before calling the function again.
+        """
         ref_antenna = self.antennas[0]
         u, v, w = zip(*[self.phase_center.uvw(antenna, self.time, ref_antenna)
                         for antenna in self.antennas])
@@ -123,12 +152,15 @@ class Rime(accel.Operation):
         l, m = self.phase_center.sphere_to_plane(ra, dec, self.time, ref_antenna, 'SIN', 'radec')
         n = np.sqrt(1 - l**2 - m**2)
         self._scaled_phase_host[:] = -2 * (np.outer(l, u) + np.outer(m, v) + np.outer(n - 1, w))
-        # TODO: this could be started asynchronously, but then we need an event
-        # to synchronize on.
-        self._scaled_phase.set(self.command_queue, self._scaled_phase_host)
+        self._scaled_phase.set_async(self.command_queue, self._scaled_phase_host)
+
+    def _run(self):
+        self._update_flux_density()
+        self._update_scaled_phase()
+        transfer_event = self.command_queue.enqueue_marker()
+
         # Locate the buffers
         out = self.buffer('out')
-        flux = self.buffer('flux')
         gain = self.buffer('gain')
         n_antennas = len(self.antennas)
         n_sources = len(self.sources)
@@ -138,8 +170,8 @@ class Rime(accel.Operation):
             [
                 out.buffer,
                 np.int32(out.padded_shape[1]),
-                flux.buffer,
-                np.int32(flux.padded_shape[1]),
+                self._flux_density.buffer,
+                np.int32(self._flux_density.padded_shape[1]),
                 gain.buffer,
                 np.int32(gain.padded_shape[1]),
                 self._inv_wavelength.buffer,
@@ -152,3 +184,6 @@ class Rime(accel.Operation):
             global_size=(accel.roundup(n_baselines, self.template.wgs), self.n_channels),
             local_size=(self.template.wgs, 1)
         )
+        # Make sure that the host->device transfers have completed, so that we
+        # are ready for another call to this function.
+        transfer_event.wait()
