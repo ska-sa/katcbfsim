@@ -105,6 +105,15 @@ class SimulatorServer(katcp.DeviceServer):
         self.subarray.sync_time = katpoint.Timestamp(timestamp)
         return 'ok',
 
+    @request(Str())
+    @return_reply()
+    def request_pointing(self, sock, target):
+        """Set the simulated pointing direction, in the format used by
+        katpoint. This also sets the phase center. This can be set while
+        capture is running, but may have a latency of a few dumps."""
+        self.subarray.pointing = katpoint.Target(target)
+        return 'ok',
+
     @request(Str(), Float())
     @return_reply(Float())
     @_product_exceptions
