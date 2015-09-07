@@ -107,11 +107,10 @@ class SimulatorServer(katcp.DeviceServer):
 
     @request(Str())
     @return_reply()
-    def request_pointing(self, sock, target):
-        """Set the simulated pointing direction, in the format used by
-        katpoint. This also sets the phase center. This can be set while
-        capture is running, but may have a latency of a few dumps."""
-        self.subarray.pointing = katpoint.Target(target)
+    def request_target(self, sock, target):
+        """Set the simulated target, in the format used by katpoint. This also
+        sets the phase center. This can be set while capture is running."""
+        self.subarray.target = katpoint.Target(target)
         return 'ok',
 
     @request(Str(), Float())

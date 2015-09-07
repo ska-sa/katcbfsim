@@ -123,7 +123,7 @@ class Subarray(object):
     def __init__(self):
         self.antennas = []
         self.sources = []
-        self.pointing = None
+        self.target = None
         self._sync_time = time.time()
         self.capturing = 0     # Number of products that are capturing
 
@@ -303,8 +303,8 @@ class FXProduct(object):
             raise IncompleteConfigError('no sources defined')
         if self.destination_factory is None:
             raise IncompleteConfigError('no destination specified')
-        if self.subarray.pointing is None:
-            raise IncompleteConfigError('no pointing direction set')
+        if self.subarray.target is None:
+            raise IncompleteConfigError('no target set')
         self.subarray.capturing += 1
         # Create a future that is set by capture_stop
         self._stop_future = trollius.Future(loop=self._loop)
@@ -365,7 +365,7 @@ class FXProduct(object):
                 predict.bind(out=data)
                 # Set the timestamp for the center of the integration period
                 predict.set_time(self.subarray.sync_time + (index + 0.5) * self.accumulation_length)
-                predict.set_phase_center(self.subarray.pointing)
+                predict.set_phase_center(self.subarray.target)
 
                 # Execute the predictor, updating data
                 logger.debug('Dump %d: waiting for device memory event', index)
