@@ -45,15 +45,12 @@ class FXStreamSpead(object):
         self._flavour = spead2.Flavour(4, 64, 48, spead2.BUG_COMPAT_PYSPEAD_0_5_2)
         self._stream = spead2.send.trollius.UdpStream(
             tp, endpoints[0].host, endpoints[0].port, config)
-        self._static_ig = self._make_static_ig()
-        self._data_ig = self._make_data_ig()
-        # The ICD defines certain ways in which items need to be placed in
-        # heaps, which makes it difficult to use HeapGenerator. So we need
-        # to track IDs ourselves.
-        self._next_cnt = 1
+        counter = spead2.send.Counter()
+        self._static_ig = self._make_static_ig(counter)
+        self._data_ig = self._make_data_ig(counter)
 
-    def _make_static_ig(self):
-        ig = spead2.ItemGroup()
+    def _make_static_ig(self, counter):
+        ig = spead2.send.ItemGroup(flavour=self._flavour, counter=counter)
         inline_fmt = [('u', self._flavour.heap_address_bits)]
         n_antennas = len(self.product.subarray.antennas)
         n_baselines = n_antennas * (n_antennas + 1) // 2
@@ -102,8 +99,8 @@ class FXStreamSpead(object):
             baselines.shape, baselines.dtype, value=baselines)
         return ig
 
-    def _make_data_ig(self):
-        ig = spead2.ItemGroup()
+    def _make_data_ig(self, counter):
+        ig = spead2.send.ItemGroup(flavour=self._flavour, counter=counter)
         inline_fmt = [('u', self._flavour.heap_address_bits)]
         # TODO: reduce code duplication here - make a property of product?
         n_antennas = len(self.product.subarray.antennas)
@@ -116,20 +113,12 @@ class FXStreamSpead(object):
             (n_channels, n_baselines * 4, 2), np.int32)
         return ig
 
-    def _next_heap(self):
-        heap = spead2.send.Heap(self._next_cnt, self._flavour)
-        self._next_cnt += 1
-        return heap
-
     @trollius.coroutine
     def send_metadata(self):
         """Reissue all the metadata on the stream."""
-        heap = self._next_heap()
-        for item in self._static_ig.values():
-            heap.add_descriptor(item)
-            heap.add_item(item)
-        for item in self._data_ig.values():
-            heap.add_descriptor(item)
+        heap = self._static_ig.get_heap(descriptors='all', data='all')
+        yield From(self._stream.async_send_heap(heap))
+        heap = self._data_ig.get_heap(descriptors='all', data='none')
         yield From(self._stream.async_send_heap(heap))
 
     @trollius.coroutine
@@ -138,9 +127,7 @@ class FXStreamSpead(object):
         vis_view = vis.view(np.int32).reshape(self._data_ig['xeng_raw'].shape)
         self._data_ig['xeng_raw'].value = vis_view
         self._data_ig['timestamp'].value = dump_index * self.product.n_accs
-        heap = self._next_heap()
-        for item in self._data_ig.values():
-            heap.add_item(item)
+        heap = self._data_ig.get_heap()
         yield From(self._stream.async_send_heap(heap))
 
     @trollius.coroutine
@@ -150,6 +137,5 @@ class FXStreamSpead(object):
         # because we always asynchronously wait for transmission, but in an
         # exception case there might be pending sends.
         self._stream.flush()
-        heap = self._next_heap()
-        heap.add_end()
+        heap = self._data_ig.get_end()
         yield From(self._stream.async_send_heap(heap))
