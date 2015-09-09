@@ -45,12 +45,11 @@ class FXStreamSpead(object):
         self._flavour = spead2.Flavour(4, 64, 48, spead2.BUG_COMPAT_PYSPEAD_0_5_2)
         self._stream = spead2.send.trollius.UdpStream(
             tp, endpoints[0].host, endpoints[0].port, config)
-        counter = spead2.send.Counter()
-        self._static_ig = self._make_static_ig(counter)
-        self._data_ig = self._make_data_ig(counter)
+        self._static_ig = self._make_static_ig()
+        self._data_ig = self._make_data_ig()
 
-    def _make_static_ig(self, counter):
-        ig = spead2.send.ItemGroup(flavour=self._flavour, counter=counter)
+    def _make_static_ig(self):
+        ig = spead2.send.ItemGroup(flavour=self._flavour)
         inline_fmt = [('u', self._flavour.heap_address_bits)]
         n_antennas = len(self.product.subarray.antennas)
         n_baselines = n_antennas * (n_antennas + 1) // 2
@@ -99,8 +98,8 @@ class FXStreamSpead(object):
             baselines.shape, baselines.dtype, value=baselines)
         return ig
 
-    def _make_data_ig(self, counter):
-        ig = spead2.send.ItemGroup(flavour=self._flavour, counter=counter)
+    def _make_data_ig(self):
+        ig = spead2.send.ItemGroup(flavour=self._flavour)
         inline_fmt = [('u', self._flavour.heap_address_bits)]
         # TODO: reduce code duplication here - make a property of product?
         n_antennas = len(self.product.subarray.antennas)
@@ -117,8 +116,7 @@ class FXStreamSpead(object):
     def send_metadata(self):
         """Reissue all the metadata on the stream."""
         heap = self._static_ig.get_heap(descriptors='all', data='all')
-        yield From(self._stream.async_send_heap(heap))
-        heap = self._data_ig.get_heap(descriptors='all', data='none')
+        self._data_ig.add_to_heap(heap, descriptors='all', data='none')
         yield From(self._stream.async_send_heap(heap))
 
     @trollius.coroutine
