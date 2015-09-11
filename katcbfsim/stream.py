@@ -7,14 +7,16 @@ import numpy as np
 import spead2
 import spead2.send
 import spead2.send.trollius
+import h5py
 import logging
+import functools
 
 
 logger = logging.getLogger(__name__)
 
 
 class FXStreamSpeadFactory(object):
-    """Data stream from an FX correlator, sent over SPEAD."""
+    """Factory that generates instances of :class:`FXStreamSpead`."""
     def __init__(self, endpoints):
         self._endpoints = endpoints
 
@@ -27,6 +29,7 @@ class FXStreamSpeadFactory(object):
 
 
 class FXStreamSpead(object):
+    """Data stream from an FX correlator, sent over SPEAD."""
     def __init__(self, endpoints, product):
         if len(endpoints) != 1:
             raise ValueError('Only exactly one endpoint is currently supported')
@@ -173,3 +176,57 @@ class FXStreamSpead(object):
         self._stream.flush()
         heap = self._ig_data.get_end()
         yield From(self._stream.async_send_heap(heap))
+
+
+class FXStreamFileFactory(object):
+    """Factory which generates instances of :class:`FXStreamFile`."""
+    def __init__(self, filename):
+        self._filename = filename
+
+    @property
+    def filename(self):
+        return self._filename
+
+    def __call__(self, *args, **kwargs):
+        return FXStreamFile(self._filename, *args, **kwargs)
+
+
+def make_coroutine(fn):
+    """Decorator to turn a normal function into a coroutine."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if False:
+            yield None
+        raise trollius.Return(fn(*args, **kwargs))
+    return wrapper
+
+
+class FXStreamFile(object):
+    """Writes data to HDF5 file. This is just the raw visibilities, and is not
+    katdal-compatible."""
+    def __init__(self, filename, product):
+        self._product = product
+        self._file = h5py.File(filename, 'w')
+        n_antennas = len(product.subarray.antennas)
+        n_baselines = n_antennas * (n_antennas + 1) // 2
+        self._dataset = self._file.create_dataset('correlator_data',
+            (0, product.channels, n_baselines * 4, 2), dtype=np.int32,
+            maxshape=(None, product.channels, n_baselines * 4, 2))
+        self._flags = None
+
+    @trollius.coroutine
+    @make_coroutine
+    def send_metadata(self):
+        pass
+
+    @trollius.coroutine
+    @make_coroutine
+    def send(self, vis, dump_index):
+        vis = vis.reshape((vis.shape[0], vis.shape[1] * 4, 2))
+        self._dataset.resize(dump_index + 1, axis=0)
+        self._dataset[dump_index : dump_index + 1, ...] = vis[np.newaxis, ...]
+
+    @trollius.coroutine
+    @make_coroutine
+    def close(self):
+        self._file.close()

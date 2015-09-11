@@ -10,7 +10,7 @@ from katcp.kattypes import Str, Float, Int, Address, request, return_reply
 from katsdptelstate import endpoint
 from . import product
 from .product import Subarray, FXProduct
-from .stream import FXStreamSpeadFactory
+from .stream import FXStreamSpeadFactory, FXStreamFileFactory
 
 
 logger = logging.getLogger(__name__)
@@ -77,6 +77,15 @@ class SimulatorServer(katcp.DeviceServer):
             if e.port is None:
                 return 'fail', 'no port specified'
         product.destination_factory = FXStreamSpeadFactory(endpoints)
+        return 'ok',
+
+    @request(Str(), Str())
+    @return_reply()
+    @_product_exceptions
+    @_product_request
+    def request_capture_destination_file(self, sock, product, destination):
+        """Set the destination to an HDF5 file"""
+        product.destination_factory = FXStreamFileFactory(destination)
         return 'ok',
 
     @request(Str(default=''))
