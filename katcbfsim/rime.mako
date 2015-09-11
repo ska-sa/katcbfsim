@@ -15,6 +15,11 @@ typedef struct
     cplex m[2][2]; // row-major order
 } jones;
 
+typedef struct
+{
+    int2 m[2][2]; // row-major order
+} ijones;
+
 // Compute a * b
 DEVICE_FN cplex cmul(cplex a, cplex b)
 {
@@ -111,6 +116,18 @@ DEVICE_FN jones scalar_jones_mul(cplex a, jones b)
     return out;
 }
 
+DEVICE_FN int2 to_int(cplex a)
+{
+#ifdef __OPENCL_VERSION__
+    return convert_int2_rte(a);
+#else
+    int2 out;
+    out.x = __float2int_rn(a.x);
+    out.y = __float2int_rn(a.y);
+    return out;
+#endif
+}
+
 /**
  * Compute predicted visibilities. The work division is that axis 0 selects the
  * baseline, axis 1 selects the frequency, and each workgroup must only handle
@@ -121,7 +138,7 @@ DEVICE_FN jones scalar_jones_mul(cplex a, jones b)
  * The baselines array must be padded out to a multiple of the work group size,
  * with valid antenna indices in the padding positions.
  *
- * @param out             Output predicted visibilities, channel-major
+ * @param out             Output predicted visibilities, channel-major, int32, xx xy yx yy
  * @param flux_density    Jones matrices for point source apparent brightness, frequency-major
  * @param gain            Jones matrix per antenna, frequency-major
  * @param inv_wavelength  Inverse of wavelength per channel, in per-metre
@@ -132,7 +149,7 @@ DEVICE_FN jones scalar_jones_mul(cplex a, jones b)
  * @param n_baselines     Number of baselines
  */
 KERNEL void predict(
-    GLOBAL jones * RESTRICT out,
+    GLOBAL ijones * RESTRICT out,
     int out_stride,
     const GLOBAL jones * RESTRICT flux_density,
     int flux_stride,
@@ -176,6 +193,10 @@ KERNEL void predict(
     {
         int offset = f * gain_stride;
         jones v = jones_mul_h(jones_mul(gain[offset + p], sum), gain[offset + q]);
-        out[f * out_stride + b] = v;
+        ijones vi;
+        for (int i = 0; i < 2; i++)
+            for (int j = 0; j < 2; j++)
+                vi.m[i][j] = to_int(v.m[i][j]);
+        out[f * out_stride + b] = vi;
     }
 }

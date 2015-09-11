@@ -349,7 +349,7 @@ class FXProduct(object):
         predict.ensure_all_bound()
         # Initialise gains. Eventually this will need to be more sophisticated.
         gain_host = predict.buffer('gain').empty_like()
-        gain_host.fill(1)
+        gain_host.fill(256)
         predict.buffer('gain').set(predict.command_queue, gain_host)
         data = [predict.buffer('out')]
         data.append(accel.DeviceArray(self.context, data[0].shape, data[0].dtype, data[0].padded_shape))

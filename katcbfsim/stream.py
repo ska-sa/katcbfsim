@@ -155,7 +155,7 @@ class FXStreamSpead(object):
     @trollius.coroutine
     def send(self, vis, dump_index):
         assert vis.flags.c_contiguous, 'Visibility array must be contiguous'
-        vis_view = vis.view(np.int32).reshape(self._ig_data['xeng_raw'].shape)
+        vis_view = vis.reshape(self._ig_data['xeng_raw'].shape)
         self._ig_data['xeng_raw'].value = vis_view
         timestamp = dump_index * self.product.n_accs
         # Truncate timestamp to the width of the field it is in
