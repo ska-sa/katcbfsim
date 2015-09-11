@@ -184,7 +184,7 @@ KERNEL void predict(
             kb[lid] = scalar_jones_mul(k_private, flux_density[f * flux_stride + source]);
         }
         BARRIER(); // TODO: could batch several sources, to reduce barrier costs
-        jones kbk = scalar_jones_mul(k[q], kb[p]);
+        jones kbk = scalar_jones_mul(cconj(k[q]), kb[p]);
         sum = jones_add(sum, kbk);
         BARRIER();
     }
