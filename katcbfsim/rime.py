@@ -4,7 +4,11 @@ from __future__ import print_function, division
 import pkg_resources
 import numpy as np
 import katpoint
+import logging
 from katsdpsigproc import accel, tune
+
+
+logger = logging.getLogger(__name__)
 
 
 class RimeTemplate(object):
@@ -120,6 +124,7 @@ class Rime(accel.Operation):
         This performs an **asynchronous** transfer to the GPU, and the caller
         must wait for it to complete before calling the function again.
         """
+        logger.debug('Starting update_flex_density')
         for channel, freq in enumerate(self.frequencies):
             freq_Mhz = freq / 1e6  # katpoint takes freq in MHz
             for i, source in enumerate(self.sources):
@@ -136,6 +141,7 @@ class Rime(accel.Operation):
                 self._flux_density_host[channel, i, 0, 1] = 0.0
                 self._flux_density_host[channel, i, 1, 0] = 0.0
                 self._flux_density_host[channel, i, 1, 1] = fd
+        logger.debug('Host flux densities updated')
         self._flux_density.set_async(self.command_queue, self._flux_density_host)
 
     def _update_scaled_phase(self):
@@ -156,9 +162,12 @@ class Rime(accel.Operation):
         self._scaled_phase.set_async(self.command_queue, self._scaled_phase_host)
 
     def _run(self):
+        logger.debug('Updating flux_density')
         self._update_flux_density()
+        logger.debug('Updating scaled_phase')
         self._update_scaled_phase()
         transfer_event = self.command_queue.enqueue_marker()
+        logger.debug('Marker enqueued')
 
         # Locate the buffers
         out = self.buffer('out')
@@ -185,6 +194,7 @@ class Rime(accel.Operation):
             global_size=(accel.roundup(n_baselines, self.template.wgs), self.n_channels),
             local_size=(self.template.wgs, 1)
         )
+        logger.debug('Kernel queued')
         if self.async:
             return transfer_event
         else:

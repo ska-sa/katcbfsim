@@ -53,6 +53,17 @@ def wait_until(future, when, loop=None):
         timeout_handle.cancel()
 
 
+@trollius.coroutine
+def _async_wait_for_events(events, loop=None):
+    def wait_for_events(events):
+        for event in events:
+            event.wait()
+    if loop is None:
+        loop = trollius.get_event_loop()
+    if events:
+        yield From(loop.run_in_executor(None, wait_for_events, events))
+
+
 class ResourceAllocation(object):
     def __init__(self, start, end, value):
         self._start = start
@@ -61,6 +72,13 @@ class ResourceAllocation(object):
 
     def wait(self):
         return self._start
+
+    @trollius.coroutine
+    def wait_events(self, loop=None):
+        if loop is None:
+            loop = trollius.get_event_loop()
+        events = yield From(self._start)
+        yield From(_async_wait_for_events(events, loop=loop))
 
     def ready(self, events=None):
         if events is None:
@@ -380,11 +398,14 @@ class FXProduct(object):
                 # Execute the predictor, updating data
                 logger.debug('Dump %d: waiting for device memory event', index)
                 events = yield From(data_a.wait())
-                logger.debug('Dump %d: device memory wait queued', index)
+                logger.debug('Dump %d: device memory wait event found', index)
                 predict.command_queue.enqueue_wait_for_events(events)
+                logger.debug('Dump %d: device memory wait queued', index)
                 predict_ready_event = predict()
+                logger.debug('Dump %d: kernel queued', index)
                 compute_event = predict.command_queue.enqueue_marker()
                 predict.command_queue.flush()
+                logger.debug('Dump %d: kernel flushed', index)
                 predict_a.ready([predict_ready_event])   # Predict object can be reused now
                 logger.debug('Dump %d: operation enqueued, waiting for host memory', index)
 
@@ -399,7 +420,7 @@ class FXProduct(object):
                 data_a.ready([transfer_event])
                 io_queue_a.ready()
                 # Wait for the transfer to complete
-                yield From(self._loop.run_in_executor(None, transfer_event.wait))
+                yield From(_async_wait_for_events([transfer_event], loop=self._loop))
                 logger.debug('Dump %d: transfer to host complete, waiting for stream', index)
 
                 # Send the data
@@ -442,7 +463,7 @@ class FXProduct(object):
                 # we will block here rather than building an ever-growing set
                 # of active coroutines.
                 logger.debug('Dump %d: waiting for predictor', index)
-                yield From(predict_a.wait())
+                yield From(predict_a.wait_events(self._loop))
                 logger.debug('Dump %d: predictor ready', index)
                 future = trollius.async(
                     self._run_dump(index, predict_a, data_a, host_a, stream_a, io_queue_a),
@@ -452,7 +473,11 @@ class FXProduct(object):
                 # to stop.
                 wall_time += self.wall_accumulation_length
                 try:
-                    # TODO: support alternative rate of time
+                    now = self._loop.time()
+                    if now > wall_time:
+                        logger.warn('Falling behind the requested rate by %f seconds', now - wall_time)
+                    else:
+                        logger.debug('Sleeping for %f seconds', wall_time - now)
                     yield From(wait_until(trollius.shield(self._stop_future), wall_time, self._loop))
                 except trollius.TimeoutError:
                     # This is the normal case: time for the next dump to be transmitted
