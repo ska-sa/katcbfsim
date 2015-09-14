@@ -97,6 +97,8 @@ class Rime(accel.Operation):
                 baselines_host[next_baseline, 1] = j
                 next_baseline += 1
         self._baselines.set(command_queue, baselines_host)
+        self._update_flux_density()
+        self.command_queue.finish()  # _update_flush_density is asynchronous
 
     def set_time(self, time):
         """Set the time for which the visibilities are simulated.
@@ -162,8 +164,6 @@ class Rime(accel.Operation):
         self._scaled_phase.set_async(self.command_queue, self._scaled_phase_host)
 
     def _run(self):
-        logger.debug('Updating flux_density')
-        self._update_flux_density()
         logger.debug('Updating scaled_phase')
         self._update_scaled_phase()
         transfer_event = self.command_queue.enqueue_marker()
