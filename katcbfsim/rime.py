@@ -49,7 +49,7 @@ class Rime(accel.Operation):
     def __init__(
             self, template, command_queue,
             center_frequency, bandwidth, n_channels,
-            sources, antennas, allocator=None):
+            sources, antennas, async=False, allocator=None):
         if len(antennas) > template.max_antennas:
             raise ValueError('Too many antennas for the template')
         super(Rime, self).__init__(command_queue, allocator)
@@ -57,6 +57,7 @@ class Rime(accel.Operation):
         self.n_channels = n_channels
         self.sources = sources
         self.antennas = antennas
+        self.async = async
         n_antennas = len(antennas)
         n_sources = len(sources)
         n_baselines = n_antennas * (n_antennas + 1) // 2
@@ -184,6 +185,9 @@ class Rime(accel.Operation):
             global_size=(accel.roundup(n_baselines, self.template.wgs), self.n_channels),
             local_size=(self.template.wgs, 1)
         )
-        # Make sure that the host->device transfers have completed, so that we
-        # are ready for another call to this function.
-        transfer_event.wait()
+        if self.async:
+            return transfer_event
+        else:
+            # Make sure that the host->device transfers have completed, so that we
+            # are ready for another call to this function.
+            transfer_event.wait()

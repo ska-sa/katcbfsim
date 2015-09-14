@@ -345,7 +345,7 @@ class FXProduct(object):
         template = rime.RimeTemplate(self.context, len(self.subarray.antennas))
         predict = template.instantiate(
             queue, self.center_frequency, self.bandwidth,
-            self.channels, self.subarray.sources, self.subarray.antennas)
+            self.channels, self.subarray.sources, self.subarray.antennas, async=True)
         predict.ensure_all_bound()
         # Initialise gains. Eventually this will need to be more sophisticated, but
         # for now it is just real and diagonal.
@@ -382,10 +382,10 @@ class FXProduct(object):
                 events = yield From(data_a.wait())
                 logger.debug('Dump %d: device memory wait queued', index)
                 predict.command_queue.enqueue_wait_for_events(events)
-                predict()
+                predict_ready_event = predict()
                 compute_event = predict.command_queue.enqueue_marker()
                 predict.command_queue.flush()
-                predict_a.ready()   # Predict object can be reused now
+                predict_a.ready([predict_ready_event])   # Predict object can be reused now
                 logger.debug('Dump %d: operation enqueued, waiting for host memory', index)
 
                 # Transfer the data back to the host
