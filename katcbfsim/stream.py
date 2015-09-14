@@ -59,7 +59,7 @@ class FXStreamSpead(object):
         n_antennas = len(self.product.subarray.antennas)
         n_baselines = n_antennas * (n_antennas + 1) // 2
         ig.add_item(0x1007, 'adc_sample_rate', 'Expected ADC sample rate (sampled/second)',
-            (), np.uint64, value=self.product.bandwidth * 2)
+            (), None, format=[('u', 64)], value=self.product.bandwidth * 2)
         ig.add_item(0x1008, 'n_bls', 'The total number of baselines in the data product. Each pair of inputs (polarisation pairs) is considered a baseline.',
             (), None, format=self._inline_format, value=n_baselines * 4)
         ig.add_item(0x1009, 'n_chans', 'The total number of frequency channels present in any integration.',
@@ -69,13 +69,13 @@ class FXStreamSpead(object):
         ig.add_item(0x100B, 'n_xengs', 'The total number of X engines in a correlator system.',
             (), None, format=self._inline_format, value=1)
         ig.add_item(0x1011, 'center_freq', 'The center frequency of the DBE in Hz, 64-bit IEEE floating-point number.',
-            (), np.float64, value=np.float64(self.product.center_frequency))
+            (), None, format=[('f', 64)], value=np.float64(self.product.center_frequency))
         ig.add_item(0x1013, 'bandwidth', 'The analogue bandwidth of the digitally processed signal in Hz.',
-            (), np.float64, value=np.float64(self.product.bandwidth))
+            (), None, format=[('f', 64)], value=np.float64(self.product.bandwidth))
         ig.add_item(0x1015, 'n_accs', 'The number of spectra that are accumulated per integration.',
             (), None, format=self._inline_format, value=self.product.n_accs)
         ig.add_item(0x1016, 'int_time', "Approximate (it's a float!) time per accumulation in seconds. This is intended for reference only. Each accumulation has an associated timestamp which should be used to determine the time of the integration rather than incrementing the start time by this value for sequential integrations (which would allow errors to grow).",
-            (), np.float64, value=self.product.accumulation_length)
+            (), None, format=[('f', 64)], value=self.product.accumulation_length)
         ig.add_item(0x1022, 'rx_udp_port', 'Destination UDP port for data output.',
             (), None, format=self._inline_format, value=self.endpoint.port)
         # TODO: this might need to be translated from hostname to IP address
@@ -86,7 +86,7 @@ class FXStreamSpead(object):
         # TODO: do we need ddc_mix_freq, adc_bits?
         # TODO: what scaling factor should we use?
         ig.add_item(0x1046, 'scale_factor_timestamp', 'Timestamp scaling factor. Divide the SPEAD data packet timestamp by this number to get back to seconds since last sync.',
-            (), np.float64, value=self.product.bandwidth / self.product.channels)
+            (), None, format=[('f', 64)], value=self.product.bandwidth / self.product.channels)
         ig.add_item(0x1048, 'xeng_out_bits_per_sample', 'The number of bits per value of the xeng accumulator output. Note this is for a single component value, not the combined complex size.',
             (), None, format=self._inline_format, value=32)
         return ig
