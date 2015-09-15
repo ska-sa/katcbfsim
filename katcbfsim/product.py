@@ -214,7 +214,7 @@ class FXProduct(object):
         Name for this product (used by katcp)
     bandwidth : int
         Total bandwidth over all channels, in Hz
-    channels : int
+    n_channels : int
         Number of channels
     loop : :class:`trollius.BaseEventLoop`, optional
         Event loop for coroutines
@@ -229,8 +229,12 @@ class FXProduct(object):
         Name for this product (used by katcp)
     bandwidth : int
         Total bandwidth over all channels, in Hz
-    channels : int
+    n_channels : int
         Number of channels
+    n_antennas : int, read-only
+        Number of antennas
+    n_baselines : int, read-only
+        Number of baselines (antenna pairs, not input pairs)
     center_frequency : int
         Frequency of the center of the band, in Hz
     destination_factory : callable
@@ -253,7 +257,7 @@ class FXProduct(object):
         :meth:`capture_start` until :meth:`capture_stop` completes, even if
         the capture coroutine terminates earlier.
     """
-    def __init__(self, context, subarray, name, bandwidth, channels, loop=None):
+    def __init__(self, context, subarray, name, bandwidth, n_channels, loop=None):
         self._capture_future = None
         self._stop_future = None
         self.context = context
@@ -261,7 +265,7 @@ class FXProduct(object):
         self.subarray = subarray
         self.destination_factory = None
         self.bandwidth = bandwidth
-        self.channels = channels
+        self.n_channels = n_channels
         self.center_frequency = 1412000000
         self.accumulation_length = 0.5
         self.time_scale = 1.0
@@ -291,13 +295,22 @@ class FXProduct(object):
     def accumulation_length(self, value):
         # Round the accumulation length in the same way the real correlator
         # would. It requires a multiple of 256 accumulations.
-        snap_length = self.channels / self.bandwidth
+        snap_length = self.n_channels / self.bandwidth
         self._n_accs = int(round(value / snap_length / 256)) * 256
         self._accumulation_length = snap_length * self.n_accs
 
     @property
     def n_accs(self):
         return self._n_accs
+
+    @property
+    def n_antennas(self):
+        return len(self.subarray.antennas)
+
+    @property
+    def n_baselines(self):
+        n = self.n_antennas
+        return n * (n + 1) // 2
 
     @property
     def capturing(self):
@@ -363,7 +376,7 @@ class FXProduct(object):
         template = rime.RimeTemplate(self.context, len(self.subarray.antennas))
         predict = template.instantiate(
             queue, self.center_frequency, self.bandwidth,
-            self.channels, self.subarray.sources, self.subarray.antennas, async=True)
+            self.n_channels, self.subarray.sources, self.subarray.antennas, async=True)
         predict.ensure_all_bound()
         # Initialise gains. Eventually this will need to be more sophisticated, but
         # for now it is just real and diagonal.

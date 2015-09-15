@@ -59,11 +59,11 @@ class SimulatorServer(katcp.DeviceServer):
 
     @request(Str(), Int(), Int())
     @return_reply()
-    def request_product_create_correlator(self, sock, name, bandwidth, channels):
+    def request_product_create_correlator(self, sock, name, bandwidth, n_channels):
         """Create a new simulated correlator product"""
         if name in self.products:
             return 'fail', 'product {} already exists'.format(name)
-        self.products[name] = FXProduct(self.context, self.subarray, name, bandwidth, channels)
+        self.products[name] = FXProduct(self.context, self.subarray, name, bandwidth, n_channels)
         return 'ok',
 
     @request(Str(), Str())

@@ -36,10 +36,8 @@ class FXStreamSpead(object):
         self.endpoint = endpoints[0]
         self.product = product
         tp = spead2.ThreadPool()
-        n_antennas = len(self.product.subarray.antennas)
-        n_baselines = n_antennas * (n_antennas + 1) // 2
-        n_channels = self.product.channels
-        in_rate = n_baselines * n_channels * 4 * 8 / self.product.accumulation_length
+        in_rate = self.product.n_baselines * self.product.n_channels * 4 * 8 / \
+            self.product.accumulation_length
         # Send at a slightly higher rate, to account for overheads, and so
         # that if the sender sends a burst we can catch up with it.
         out_rate = in_rate * 1.05
@@ -56,16 +54,14 @@ class FXStreamSpead(object):
 
     def _make_ig_static(self):
         ig = spead2.send.ItemGroup(flavour=self._flavour)
-        n_antennas = len(self.product.subarray.antennas)
-        n_baselines = n_antennas * (n_antennas + 1) // 2
         ig.add_item(0x1007, 'adc_sample_rate', 'Expected ADC sample rate (sampled/second)',
             (), None, format=[('u', 64)], value=self.product.bandwidth * 2)
         ig.add_item(0x1008, 'n_bls', 'The total number of baselines in the data product. Each pair of inputs (polarisation pairs) is considered a baseline.',
-            (), None, format=self._inline_format, value=n_baselines * 4)
+            (), None, format=self._inline_format, value=self.product.n_baselines * 4)
         ig.add_item(0x1009, 'n_chans', 'The total number of frequency channels present in any integration.',
-            (), None, format=self._inline_format, value=self.product.channels)
+            (), None, format=self._inline_format, value=self.product.n_channels)
         ig.add_item(0x100A, 'n_ants', 'The total number of dual-pol antennas in the system.',
-            (), None, format=self._inline_format, value=n_antennas)
+            (), None, format=self._inline_format, value=self.product.n_antennas)
         ig.add_item(0x100B, 'n_xengs', 'The total number of X engines in a correlator system.',
             (), None, format=self._inline_format, value=1)
         ig.add_item(0x1011, 'center_freq', 'The center frequency of the DBE in Hz, 64-bit IEEE floating-point number.',
@@ -86,14 +82,14 @@ class FXStreamSpead(object):
         # TODO: do we need ddc_mix_freq, adc_bits?
         # TODO: what scaling factor should we use?
         ig.add_item(0x1046, 'scale_factor_timestamp', 'Timestamp scaling factor. Divide the SPEAD data packet timestamp by this number to get back to seconds since last sync.',
-            (), None, format=[('f', 64)], value=self.product.bandwidth / self.product.channels)
+            (), None, format=[('f', 64)], value=self.product.bandwidth / self.product.n_channels)
         ig.add_item(0x1048, 'xeng_out_bits_per_sample', 'The number of bits per value of the xeng accumulator output. Note this is for a single component value, not the combined complex size.',
             (), None, format=self._inline_format, value=32)
         return ig
 
     def _make_ig_gain(self):
         ig = spead2.send.ItemGroup(flavour=self._flavour)
-        initial_gain = np.zeros((self.product.channels, 2), np.uint32)
+        initial_gain = np.zeros((self.product.n_channels, 2), np.uint32)
         initial_gain[:, 0].fill(200)    # Arbitrary value for now (200 + 0j)
         input_number = 0
         for i, antenna in enumerate(self.product.subarray.antennas):
@@ -105,10 +101,9 @@ class FXStreamSpead(object):
 
     def _make_ig_labels(self):
         ig = spead2.send.ItemGroup(flavour=self._flavour)
-        n_antennas = len(self.product.subarray.antennas)
         baselines = []
-        for i in range(n_antennas):
-            for j in range(i, n_antennas):
+        for i in range(self.product.n_antennas):
+            for j in range(i, self.product.n_antennas):
                 for pol1 in ('v', 'h'):
                     for pol2 in ('v', 'h'):
                         name1 = self.product.subarray.antennas[i].name + pol1
@@ -132,15 +127,11 @@ class FXStreamSpead(object):
 
     def _make_ig_data(self):
         ig = spead2.send.ItemGroup(flavour=self._flavour)
-        # TODO: reduce code duplication here - make a property of product?
-        n_antennas = len(self.product.subarray.antennas)
-        n_baselines = n_antennas * (n_antennas + 1) // 2
-        n_channels = self.product.channels
         ig.add_item(0x1600, 'timestamp', 'Timestamp of start of this integration. uint counting multiples of ADC samples since last sync (sync_time, id=0x1027). Divide this number by timestamp_scale (id=0x1046) to get back to seconds since last sync when this integration was actually started. Note that the receiver will need to figure out the centre timestamp of the accumulation (eg, by adding half of int_time, id 0x1016).',
             (), None, format=self._inline_format)
         # flags_xeng_raw is still TBD in the ICD, so omitted for now
         ig.add_item(0x1800, 'xeng_raw', 'Raw data stream from all the X-engines in the system. For KAT-7, this item represents a full spectrum (all frequency channels) assembled from lowest frequency to highest frequency. Each frequency channel contains the data for all baselines (n_bls given by SPEAD Id=0x1008). Each value is a complex number - two (real and imaginary) signed integers.',
-            (n_channels, n_baselines * 4, 2), np.int32)
+            (self.product.n_channels, self.product.n_baselines * 4, 2), np.int32)
         return ig
 
     @trollius.coroutine
@@ -207,11 +198,9 @@ class FXStreamFile(object):
     def __init__(self, filename, product):
         self._product = product
         self._file = h5py.File(filename, 'w')
-        n_antennas = len(product.subarray.antennas)
-        n_baselines = n_antennas * (n_antennas + 1) // 2
         self._dataset = self._file.create_dataset('correlator_data',
-            (0, product.channels, n_baselines * 4, 2), dtype=np.int32,
-            maxshape=(None, product.channels, n_baselines * 4, 2))
+            (0, product.n_channels, product.n_baselines * 4, 2), dtype=np.int32,
+            maxshape=(None, product.n_channels, product.n_baselines * 4, 2))
         self._flags = None
 
     @trollius.coroutine
