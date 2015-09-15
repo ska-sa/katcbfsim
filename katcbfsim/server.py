@@ -6,6 +6,7 @@ import katpoint
 import tornado
 import logging
 import functools
+from katcp import Sensor
 from katcp.kattypes import Str, Float, Int, Address, request, return_reply
 from katsdptelstate import endpoint
 from . import product
@@ -53,9 +54,13 @@ class SimulatorServer(katcp.DeviceServer):
         self.context = context
         self.products = {}
         self.subarray = Subarray()
+        # Dictionary of dictionaries, indexed by product then sensor name
+        self.product_sensors = {}
 
     def setup_sensors(self):
-        pass
+        self.add_sensor(Sensor.discrete('device-status',
+            'Dummy device status sensor. The simulator is always ok.',
+            '', ['ok', 'degraded', 'fail'], initial_status=Sensor.NOMINAL))
 
     @request(Str(), Int(), Int())
     @return_reply()
@@ -63,7 +68,20 @@ class SimulatorServer(katcp.DeviceServer):
         """Create a new simulated correlator product"""
         if name in self.products:
             return 'fail', 'product {} already exists'.format(name)
-        self.products[name] = FXProduct(self.context, self.subarray, name, bandwidth, n_channels)
+        product = FXProduct(self.context, self.subarray, name, bandwidth, n_channels)
+        self.products[name] = product
+        self.product_sensors[product] = {
+            'bandwidth': Sensor.integer('{}.bandwidth'.format(name),
+                'The bandwidth currently configured for the data product',
+                'Hz', default=bandwidth, initial_status=Sensor.NOMINAL),
+            'channels': Sensor.integer('{}.channels'.format(name),
+                'The number of channels of the channelised data product',
+                '', default=n_channels, initial_status=Sensor.NOMINAL),
+            'centerfrequency': Sensor.integer('{}.centerfrequency'.format(name),
+                'The center frequency for the data product', 'Hz')
+        }
+        for sensor in self.product_sensors[product].itervalues():
+            self.add_sensor(sensor)
         return 'ok',
 
     @request(Str(), Str())
@@ -135,7 +153,7 @@ class SimulatorServer(katcp.DeviceServer):
         # We are thus returning the rounded value.
         return 'ok', product.accumulation_length
 
-    @request(Str(), Float())
+    @request(Str(), Int())
     @return_reply()
     @_product_exceptions
     @_product_request
@@ -144,6 +162,8 @@ class SimulatorServer(katcp.DeviceServer):
         arbitrary frequency may be selected, and it will not be rounded.
         """
         product.center_frequency = frequency
+        # TODO: get the simulated timestamp from the product
+        self.product_sensors[product]['centerfrequency'].set_value(frequency)
         return 'ok',
 
     @request(Str())
