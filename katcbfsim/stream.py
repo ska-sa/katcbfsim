@@ -44,7 +44,7 @@ class FXStreamSpead(object):
         # that if the sender sends a burst we can catch up with it.
         out_rate = in_rate * 1.05
 
-        config = spead2.send.StreamConfig(rate=out_rate)
+        config = spead2.send.StreamConfig(rate=out_rate, max_packet_size=9172)
         self._flavour = spead2.Flavour(4, 64, 48, spead2.BUG_COMPAT_PYSPEAD_0_5_2)
         self._inline_format = [('u', self._flavour.heap_address_bits)]
         self._stream = spead2.send.trollius.UdpStream(
