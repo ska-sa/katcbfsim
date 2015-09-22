@@ -152,7 +152,10 @@ class Rime(accel.Operation):
         This performs an **asynchronous** transfer to the GPU, and the caller
         must wait for it to complete before calling the function again.
         """
-        ref_antenna = self.antennas[0]
+        # Create a reference antenna from the reference position of the first
+        # antenna. If all the antennas use the same reference point, this
+        # allows for a faster path through katpoint.Target.uvw.
+        ref_antenna = katpoint.Antenna('', *self.antennas[0].ref_position_wgs84)
         u, v, w = zip(*[self.phase_center.uvw(antenna, self.time, ref_antenna)
                         for antenna in self.antennas])
         ra, dec = zip(*[source.radec(self.time, ref_antenna) for source in self.sources])
