@@ -196,6 +196,12 @@ class Subarray(object):
             raise CaptureInProgressError('cannot change sync time while capture in progress')
         self._sync_time = katpoint.Timestamp(int(value.secs))
 
+    def target_at(self, timestamp):
+        """Obtains the target at a given point in simulated time. In this base
+        class this just returns :attr:`target`, but it can be overridden by
+        subclasses to allow the target to be pulled rather than pushed."""
+        return self.target
+
 
 class FXProduct(object):
     """Simulation of a correlation product.
@@ -337,7 +343,7 @@ class FXProduct(object):
             raise IncompleteConfigError('no sources defined')
         if self.destination_factory is None:
             raise IncompleteConfigError('no destination specified')
-        if self.subarray.target is None:
+        if self.subarray.target_at(self.subarray.sync_time) is None:
             raise IncompleteConfigError('no target set')
         self.subarray.capturing += 1
         # Create a future that is set by capture_stop
@@ -404,9 +410,11 @@ class FXProduct(object):
                 # command queue to serialise use.
                 yield From(predict_a.wait())
                 predict.bind(out=data)
+                dump_start_time = self.subarray.sync_time + index * self.accumulation_length
                 # Set the timestamp for the center of the integration period
-                predict.set_time(self.subarray.sync_time + (index + 0.5) * self.accumulation_length)
-                predict.set_phase_center(self.subarray.target)
+                dump_center_time = dump_start_time + 0.5 * self.accumulation_length
+                predict.set_time(dump_center_time)
+                predict.set_phase_center(self.subarray.target_at(dump_start_time))
 
                 # Execute the predictor, updating data
                 logger.debug('Dump %d: waiting for device memory event', index)

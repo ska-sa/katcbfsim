@@ -49,11 +49,14 @@ class SimulatorServer(katcp.DeviceServer):
     VERSION_INFO = ('katcbfsim-api', 1, 0)
     BUILD_INFO = ('katcbfsim', 0, 1, '')
 
-    def __init__(self, context, *args, **kwargs):
+    def __init__(self, context, subarray=None, *args, **kwargs):
         super(SimulatorServer, self).__init__(*args, **kwargs)
         self.context = context
         self.products = {}
-        self.subarray = Subarray()
+        if subarray is None:
+            self.subarray = Subarray()
+        else:
+            self.subarray = subarray
         # Dictionary of dictionaries, indexed by product then sensor name
         self.product_sensors = {}
 
@@ -62,6 +65,23 @@ class SimulatorServer(katcp.DeviceServer):
             'Dummy device status sensor. The simulator is always ok.',
             '', ['ok', 'degraded', 'fail'], initial_status=Sensor.NOMINAL))
 
+    def add_product(self, product):
+        name = product.name
+        assert name not in self.products
+        self.products[name] = product
+        self.product_sensors[product] = {
+            'bandwidth': Sensor.integer('{}.bandwidth'.format(name),
+                'The bandwidth currently configured for the data product',
+                'Hz', default=product.bandwidth, initial_status=Sensor.NOMINAL),
+            'channels': Sensor.integer('{}.channels'.format(name),
+                'The number of channels of the channelised data product',
+                '', default=product.n_channels, initial_status=Sensor.NOMINAL),
+            'centerfrequency': Sensor.integer('{}.centerfrequency'.format(name),
+                'The center frequency for the data product', 'Hz')
+        }
+        for sensor in self.product_sensors[product].itervalues():
+            self.add_sensor(sensor)
+
     @request(Str(), Int(), Int())
     @return_reply()
     def request_product_create_correlator(self, sock, name, bandwidth, n_channels):
@@ -69,20 +89,11 @@ class SimulatorServer(katcp.DeviceServer):
         if name in self.products:
             return 'fail', 'product {} already exists'.format(name)
         product = FXProduct(self.context, self.subarray, name, bandwidth, n_channels)
-        self.products[name] = product
-        self.product_sensors[product] = {
-            'bandwidth': Sensor.integer('{}.bandwidth'.format(name),
-                'The bandwidth currently configured for the data product',
-                'Hz', default=bandwidth, initial_status=Sensor.NOMINAL),
-            'channels': Sensor.integer('{}.channels'.format(name),
-                'The number of channels of the channelised data product',
-                '', default=n_channels, initial_status=Sensor.NOMINAL),
-            'centerfrequency': Sensor.integer('{}.centerfrequency'.format(name),
-                'The center frequency for the data product', 'Hz')
-        }
-        for sensor in self.product_sensors[product].itervalues():
-            self.add_sensor(sensor)
+        self.add_product(product)
         return 'ok',
+
+    def set_destination(self, product, endpoints):
+        product.destination_factory = FXStreamSpeadFactory(endpoints)
 
     @request(Str(), Str())
     @return_reply()
@@ -94,7 +105,7 @@ class SimulatorServer(katcp.DeviceServer):
         for e in endpoints:
             if e.port is None:
                 return 'fail', 'no port specified'
-        product.destination_factory = FXStreamSpeadFactory(endpoints)
+        self.set_destination(product, endpoints)
         return 'ok',
 
     @request(Str(), Str())
@@ -123,13 +134,16 @@ class SimulatorServer(katcp.DeviceServer):
                 sock.inform(','.join([str(x) for x in endpoints]))
         return 'ok',
 
+    def set_sync_time(self, timestamp):
+        self.subarray.sync_time = katpoint.Timestamp(timestamp)
+
     @request(Int())
     @return_reply()
     @_product_exceptions
     def request_sync_time(self, sock, timestamp):
         """Set the sync time, as seconds since the UNIX epoch. This will also
         be the timestamp associated with the first data dump."""
-        self.subarray.sync_time = katpoint.Timestamp(timestamp)
+        self.set_sync_time(timestamp)
         return 'ok',
 
     @request(Str())
@@ -140,6 +154,9 @@ class SimulatorServer(katcp.DeviceServer):
         self.subarray.target = katpoint.Target(target)
         return 'ok',
 
+    def set_accumulation_length(self, product, period):
+        product.accumulation_length = period
+
     @request(Str(), Float())
     @return_reply(Float())
     @_product_exceptions
@@ -148,10 +165,15 @@ class SimulatorServer(katcp.DeviceServer):
         """Set the accumulation interval for a product.
 
         Note: this differs from the CAM-CBF ICD, in which this is subarray-wide."""
-        product.accumulation_length = period
+        self.set_accumulation_length(product, period)
         # accumulation_length is a property, and the setter rounds the value.
         # We are thus returning the rounded value.
         return 'ok', product.accumulation_length
+
+    def set_center_frequency(self, product, frequency):
+        product.center_frequency = frequency
+        # TODO: get the simulated timestamp from the product
+        self.product_sensors[product]['centerfrequency'].set_value(frequency)
 
     @request(Str(), Int())
     @return_reply()
@@ -161,17 +183,18 @@ class SimulatorServer(katcp.DeviceServer):
         """Set the center frequency for the band. Unlike the real CBF, an
         arbitrary frequency may be selected, and it will not be rounded.
         """
-        product.center_frequency = frequency
-        # TODO: get the simulated timestamp from the product
-        self.product_sensors[product]['centerfrequency'].set_value(frequency)
+        self.set_center_frequency(product, frequency)
         return 'ok',
+
+    def add_antenna(self, antenna):
+        self.subarray.add_antenna(antenna)
 
     @request(Str())
     @return_reply()
     @_product_exceptions
     def request_antenna_add(self, sock, antenna_str):
         """Add an antenna to the simulated array, in the format accepted by katpoint."""
-        self.subarray.add_antenna(katpoint.Antenna(antenna_str))
+        self.add_antenna(katpoint.Antenna(antenna_str))
         return 'ok',
 
     @request()
@@ -182,12 +205,15 @@ class SimulatorServer(katcp.DeviceServer):
             sock.inform(antenna.description)
         return 'ok',
 
+    def add_source(self, source):
+        self.subarray.add_source(source)
+
     @request(Str())
     @return_reply()
     @_product_exceptions
     def request_source_add(self, sock, source_str):
         """Add a source to the sky model, in the format accepted by katpoint."""
-        self.subarray.add_source(katpoint.Target(source_str))
+        self.add_source(katpoint.Target(source_str))
         return 'ok',
 
     @request()
