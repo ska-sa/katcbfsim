@@ -83,13 +83,13 @@ class SimulatorServer(katcp.DeviceServer):
             self.add_sensor(sensor)
         return product
 
-    @request(Str(), Int(), Int())
+    @request(Str(), Int(), Int(), Int())
     @return_reply()
-    def request_product_create_correlator(self, sock, name, bandwidth, n_channels):
+    def request_product_create_correlator(self, sock, name, adc_rate, bandwidth, n_channels):
         """Create a new simulated correlator product"""
         if name in self._products:
             return 'fail', 'product {} already exists'.format(name)
-        self.add_fx_product(name, bandwidth, n_channels)
+        self.add_fx_product(name, adc_rate, bandwidth, n_channels)
         return 'ok',
 
     def set_destination(self, product, endpoints):

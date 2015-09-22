@@ -217,6 +217,8 @@ class FXProduct(object):
         Subarray corresponding to this product
     name : str
         Name for this product (used by katcp)
+    adc_rate : int
+        Simulated ADC clock rate, in Hz
     bandwidth : int
         Total bandwidth over all channels, in Hz
     n_channels : int
@@ -232,6 +234,8 @@ class FXProduct(object):
         Subarray corresponding to this product
     name : :class:`str`
         Name for this product (used by katcp)
+    adc_rate : int
+        Simulated ADC clock rate, in Hz
     bandwidth : int
         Total bandwidth over all channels, in Hz
     n_channels : int
@@ -262,13 +266,14 @@ class FXProduct(object):
         :meth:`capture_start` until :meth:`capture_stop` completes, even if
         the capture coroutine terminates earlier.
     """
-    def __init__(self, context, subarray, name, bandwidth, n_channels, loop=None):
+    def __init__(self, context, subarray, name, adc_rate, bandwidth, n_channels, loop=None):
         self._capture_future = None
         self._stop_future = None
         self.context = context
         self.name = name
         self.subarray = subarray
         self.destination_factory = None
+        self.adc_rate = adc_rate
         self.bandwidth = bandwidth
         self.n_channels = n_channels
         self.center_frequency = 1412000000

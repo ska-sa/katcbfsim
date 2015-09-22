@@ -55,7 +55,7 @@ class FXStreamSpead(object):
     def _make_ig_static(self):
         ig = spead2.send.ItemGroup(flavour=self._flavour)
         ig.add_item(0x1007, 'adc_sample_rate', 'Expected ADC sample rate (sampled/second)',
-            (), None, format=[('u', 64)], value=self.product.bandwidth * 2)
+            (), None, format=[('u', 64)], value=self.product.adc_rate)
         ig.add_item(0x1008, 'n_bls', 'The total number of baselines in the data product. Each pair of inputs (polarisation pairs) is considered a baseline.',
             (), None, format=self._inline_format, value=self.product.n_baselines * 4)
         ig.add_item(0x1009, 'n_chans', 'The total number of frequency channels present in any integration.',

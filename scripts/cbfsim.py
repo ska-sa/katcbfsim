@@ -68,7 +68,7 @@ def prepare_server(server, args):
         server.set_target(katpoint.Target(args.target))
     if args.create_fx_product is not None:
         product = server.add_fx_product(args.create_fx_product,
-            args.bandwidth, args.cbf_channels)
+            args.adc_rate, args.bandwidth, args.cbf_channels)
         server.set_accumulation_length(product, args.int_time)
         server.set_center_frequency(product, args.center_frequency)
         server.set_destination(product, [args.cbf_spead])
@@ -82,8 +82,8 @@ def main():
     parser.add_argument('--start', action='store_true', help='Start the defined products')
     parser.add_argument('--cbf-channels', type=int, default=32768, metavar='N', help='Number of channels [%(default)s]')
     parser.add_argument('--adc-rate', type=int, default=1712000000, metavar='HZ', help='ADC rate [%(default)s]'),
-    parser.add_argument('--center-frequency', type=int, default=1412000000, metavar='HZ', help='Center frequency [%(default)s]')
     parser.add_argument('--bandwidth', type=int, default=856000000, metavar='HZ', help='Bandwidth [%(default)s]')
+    parser.add_argument('--center-frequency', type=int, default=1412000000, metavar='HZ', help='Center frequency [%(default)s]')
     parser.add_argument('--cbf-spead', type=katsdptelstate.endpoint.endpoint_parser(7148), metavar='ENDPOINT', default='127.0.0.1:7148', help='destination for CBF output [%(default)s]')
     parser.add_argument('--sync-time', type=int, metavar='TIME', help='Sync time as UNIX timestamp [now]')
     parser.add_argument('--int-time', type=float, metavar='TIME', default=0.5, help='Integration time in seconds [%(default)s]')
