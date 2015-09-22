@@ -24,7 +24,7 @@ def _product_request(wrapped):
     """
     def wrapper(self, sock, name, *args, **kwargs):
         try:
-            product = self.products[name]
+            product = self._products[name]
         except KeyError:
             return 'fail', 'requested product name not found'
         return wrapped(self, sock, product, *args, **kwargs)
@@ -51,25 +51,25 @@ class SimulatorServer(katcp.DeviceServer):
 
     def __init__(self, context, subarray=None, *args, **kwargs):
         super(SimulatorServer, self).__init__(*args, **kwargs)
-        self.context = context
-        self.products = {}
+        self._context = context
+        self._products = {}
         if subarray is None:
-            self.subarray = Subarray()
+            self._subarray = Subarray()
         else:
-            self.subarray = subarray
+            self._subarray = subarray
         # Dictionary of dictionaries, indexed by product then sensor name
-        self.product_sensors = {}
+        self._product_sensors = {}
 
     def setup_sensors(self):
         self.add_sensor(Sensor.discrete('device-status',
             'Dummy device status sensor. The simulator is always ok.',
             '', ['ok', 'degraded', 'fail'], initial_status=Sensor.NOMINAL))
 
-    def add_product(self, product):
-        name = product.name
-        assert name not in self.products
-        self.products[name] = product
-        self.product_sensors[product] = {
+    def add_fx_product(self, name, *args, **kwargs):
+        assert name not in self._products
+        product = FXProduct(self._context, self._subarray, name, *args, **kwargs)
+        self._products[name] = product
+        self._product_sensors[product] = {
             'bandwidth': Sensor.integer('{}.bandwidth'.format(name),
                 'The bandwidth currently configured for the data product',
                 'Hz', default=product.bandwidth, initial_status=Sensor.NOMINAL),
@@ -79,17 +79,17 @@ class SimulatorServer(katcp.DeviceServer):
             'centerfrequency': Sensor.integer('{}.centerfrequency'.format(name),
                 'The center frequency for the data product', 'Hz')
         }
-        for sensor in self.product_sensors[product].itervalues():
+        for sensor in self._product_sensors[product].itervalues():
             self.add_sensor(sensor)
+        return product
 
     @request(Str(), Int(), Int())
     @return_reply()
     def request_product_create_correlator(self, sock, name, bandwidth, n_channels):
         """Create a new simulated correlator product"""
-        if name in self.products:
+        if name in self._products:
             return 'fail', 'product {} already exists'.format(name)
-        product = FXProduct(self.context, self.subarray, name, bandwidth, n_channels)
-        self.add_product(product)
+        self.add_fx_product(name, bandwidth, n_channels)
         return 'ok',
 
     def set_destination(self, product, endpoints):
@@ -121,9 +121,9 @@ class SimulatorServer(katcp.DeviceServer):
     @return_reply()
     def request_capture_list(self, sock, req_name):
         """List the destination endpoints for a product, or all products"""
-        if req_name != '' and req_name not in self.products:
+        if req_name != '' and req_name not in self._products:
             return 'fail', 'requested product name not found'
-        for name, product in self.products.items():
+        for name, product in self._products.items():
             if req_name == '' or req_name == name:
                 try:
                     endpoints = product.destination.endpoints
@@ -135,7 +135,7 @@ class SimulatorServer(katcp.DeviceServer):
         return 'ok',
 
     def set_sync_time(self, timestamp):
-        self.subarray.sync_time = katpoint.Timestamp(timestamp)
+        self._subarray.sync_time = katpoint.Timestamp(timestamp)
 
     @request(Int())
     @return_reply()
@@ -147,7 +147,7 @@ class SimulatorServer(katcp.DeviceServer):
         return 'ok',
 
     def set_target(self, target):
-        self.subarray.target = target
+        self._subarray.target = target
 
     @request(Str())
     @return_reply()
@@ -176,7 +176,7 @@ class SimulatorServer(katcp.DeviceServer):
     def set_center_frequency(self, product, frequency):
         product.center_frequency = frequency
         # TODO: get the simulated timestamp from the product
-        self.product_sensors[product]['centerfrequency'].set_value(frequency)
+        self._product_sensors[product]['centerfrequency'].set_value(frequency)
 
     @request(Str(), Int())
     @return_reply()
@@ -190,7 +190,7 @@ class SimulatorServer(katcp.DeviceServer):
         return 'ok',
 
     def add_antenna(self, antenna):
-        self.subarray.add_antenna(antenna)
+        self._subarray.add_antenna(antenna)
 
     @request(Str())
     @return_reply()
@@ -204,12 +204,12 @@ class SimulatorServer(katcp.DeviceServer):
     @return_reply()
     def request_antenna_list(self, sock):
         """Report all the antennas in the simulated array"""
-        for antenna in self.subarray.antennas:
+        for antenna in self._subarray.antennas:
             sock.inform(antenna.description)
         return 'ok',
 
     def add_source(self, source):
-        self.subarray.add_source(source)
+        self._subarray.add_source(source)
 
     @request(Str())
     @return_reply()
@@ -223,7 +223,7 @@ class SimulatorServer(katcp.DeviceServer):
     @return_reply()
     def request_source_list(self, sock):
         """List the sources in the sky model."""
-        for source in self.subarray.sources:
+        for source in self._subarray.sources:
             sock.inform(source.description)
         return 'ok',
 
@@ -245,7 +245,7 @@ class SimulatorServer(katcp.DeviceServer):
     def request_capture_stop(self, sock, name):
         """Stop the flow of data for a product"""
         try:
-            product = self.products[name]
+            product = self._products[name]
         except KeyError:
             raise tornado.gen.Return(('fail', 'requested product name not found'))
         stop = trollius.async(product.capture_stop())
@@ -254,7 +254,7 @@ class SimulatorServer(katcp.DeviceServer):
 
     @tornado.gen.coroutine
     def request_halt(self, req, msg):
-        for product in self.products.values():
+        for product in self._products.values():
             stop = trollius.async(product.capture_stop())
             yield tornado.platform.asyncio.to_tornado_future(stop)
         yield tornado.gen.maybe_future(super(SimulatorServer, self).request_halt(req, msg))

@@ -67,9 +67,8 @@ def prepare_server(server, args):
     if args.target is not None:
         server.set_target(katpoint.Target(args.target))
     if args.create_fx_product is not None:
-        product = FXProduct(server.context, server.subarray, args.create_fx_product,
+        product = server.add_fx_product(args.create_fx_product,
             args.bandwidth, args.cbf_channels)
-        server.add_product(product)
         server.set_accumulation_length(product, args.int_time)
         server.set_center_frequency(product, args.center_frequency)
         server.set_destination(product, [args.cbf_spead])
