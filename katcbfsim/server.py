@@ -146,12 +146,15 @@ class SimulatorServer(katcp.DeviceServer):
         self.set_sync_time(timestamp)
         return 'ok',
 
+    def set_target(self, target):
+        self.subarray.target = target
+
     @request(Str())
     @return_reply()
     def request_target(self, sock, target):
         """Set the simulated target, in the format used by katpoint. This also
         sets the phase center. This can be set while capture is running."""
-        self.subarray.target = katpoint.Target(target)
+        self.set_target(katpoint.Target(target))
         return 'ok',
 
     def set_accumulation_length(self, product, period):
@@ -224,13 +227,16 @@ class SimulatorServer(katcp.DeviceServer):
             sock.inform(source.description)
         return 'ok',
 
+    def capture_start(self, product):
+        product.capture_start()
+
     @request(Str())
     @return_reply()
     @_product_exceptions
     @_product_request
     def request_capture_start(self, sock, product):
         """Start the flow of data for a product"""
-        product.capture_start()
+        self.capture_start(product)
         return 'ok',
 
     @request(Str())

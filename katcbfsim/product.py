@@ -1,7 +1,6 @@
 from __future__ import print_function, division
 import trollius
 import logging
-import time
 import collections
 from trollius import From
 from katsdptelstate import endpoint
@@ -145,7 +144,7 @@ class Subarray(object):
         self.antennas = []
         self.sources = []
         self.target = None
-        self._sync_time = time.time()
+        self._sync_time = katpoint.Timestamp()
         self.capturing = 0     # Number of products that are capturing
 
     def add_antenna(self, antenna):
