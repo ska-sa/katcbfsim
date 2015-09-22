@@ -44,6 +44,7 @@ def antenna_desc():
 
 
 def main():
+    print("WARNING: these positions are probably not accurate (no delay model used)!""")
     antennas = get_antennas_katconfig_meerkat()
     with tables.table('ANTENNA', antenna_desc(), nrow=len(antennas)) as table:
         table.putcol('NAME', [x.name for x in antennas])
