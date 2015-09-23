@@ -39,7 +39,7 @@ class TelstateSubarray(Subarray):
 
     def target_at(self, timestamp):
         try:
-            target = self._telstate.get_range('cbfsim_target', None, timestamp.secs)
+            target = self._telstate.get_range('cbf_target', None, timestamp.secs)
             if target:
                 return katpoint.Target(target[-1][0])  # Last element, value part of tuple
         except KeyError:
@@ -50,27 +50,27 @@ class TelstateSubarray(Subarray):
 
 def prepare_server(server, args):
     """Do server configuration specified by command-line configuration"""
-    for antenna in args.antenna:
+    for antenna in args.cbf_antennas:
         server.add_antenna(katpoint.Antenna(antenna['description']))
-    if args.antenna_file is not None:
-        with open(args.antenna_file) as f:
+    if args.cbf_antenna_file is not None:
+        with open(args.cbf_antenna_file) as f:
             for line in f:
                 server.add_antenna(katpoint.Antenna(line))
-    for source in args.source:
+    for source in args.cbf_sim_sources:
         server.add_source(katpoint.Target(source['description']))
-    if args.source_file is not None:
-        with open(args.source_file) as f:
+    if args.cbf_sim_source_file is not None:
+        with open(args.cbf_sim_source_file) as f:
             for line in f:
                 server.add_antenna(katpoint.Target(line))
-    if args.sync_time is not None:
-        server.set_sync_time(args.sync_time)
-    if args.target is not None:
-        server.set_target(katpoint.Target(args.target))
+    if args.cbf_sync_time is not None:
+        server.set_sync_time(args.cbf_sync_time)
+    if args.cbf_target is not None:
+        server.set_target(katpoint.Target(args.cbf_target))
     if args.create_fx_product is not None:
         product = server.add_fx_product(args.create_fx_product,
-            args.adc_rate, args.bandwidth, args.cbf_channels)
-        server.set_accumulation_length(product, args.int_time)
-        server.set_center_frequency(product, args.center_frequency)
+            args.cbf_adc_sample_rate, args.cbf_bandwidth, args.cbf_channels)
+        server.set_accumulation_length(product, args.cbf_int_time)
+        server.set_center_frequency(product, args.cbf_center_freq)
         server.set_destination(product, [args.cbf_spead])
         if args.start:
             server.capture_start(product)
@@ -81,17 +81,17 @@ def main():
     parser.add_argument('--create-fx-product', type=str, metavar='NAME', help='Create a correlator product without prompting from katcp')
     parser.add_argument('--start', action='store_true', help='Start the defined products')
     parser.add_argument('--cbf-channels', type=int, default=32768, metavar='N', help='Number of channels [%(default)s]')
-    parser.add_argument('--adc-rate', type=int, default=1712000000, metavar='HZ', help='ADC rate [%(default)s]'),
-    parser.add_argument('--bandwidth', type=int, default=856000000, metavar='HZ', help='Bandwidth [%(default)s]')
-    parser.add_argument('--center-frequency', type=int, default=1412000000, metavar='HZ', help='Center frequency [%(default)s]')
+    parser.add_argument('--cbf-adc-sample-rate', type=int, default=1712000000, metavar='HZ', help='ADC rate [%(default)s]'),
+    parser.add_argument('--cbf-bandwidth', type=int, default=856000000, metavar='HZ', help='Bandwidth [%(default)s]')
+    parser.add_argument('--cbf-center-freq', type=int, default=1412000000, metavar='HZ', help='Center frequency [%(default)s]')
     parser.add_argument('--cbf-spead', type=katsdptelstate.endpoint.endpoint_parser(7148), metavar='ENDPOINT', default='127.0.0.1:7148', help='destination for CBF output [%(default)s]')
-    parser.add_argument('--sync-time', type=int, metavar='TIME', help='Sync time as UNIX timestamp [now]')
-    parser.add_argument('--int-time', type=float, metavar='TIME', default=0.5, help='Integration time in seconds [%(default)s]')
-    parser.add_argument('--antenna', type=parse_antenna, action='append', default=[], metavar='DESCRIPTION', help='Specify an antenna (can be used multiple times)')
-    parser.add_argument('--antenna-file', metavar='FILE', help='Load antenna descriptions from file, one per line')
-    parser.add_argument('--source', type=parse_source, action='append', default=[], metavar='DESCRIPTION', help='Specify a source object (can be used multiple times)')
-    parser.add_argument('--source-file', metavar='FILE', help='Load source descriptions from file, one per line')
-    parser.add_argument('--target', metavar='DESCRIPTION', help='Set initial target')
+    parser.add_argument('--cbf-sync-time', type=int, metavar='TIME', help='Sync time as UNIX timestamp [now]')
+    parser.add_argument('--cbf-int-time', type=float, metavar='TIME', default=0.5, help='Integration time in seconds [%(default)s]')
+    parser.add_argument('--cbf-antenna', dest='cbf_antennas', type=parse_antenna, action='append', default=[], metavar='DESCRIPTION', help='Specify an antenna (can be used multiple times)')
+    parser.add_argument('--cbf-antenna-file', metavar='FILE', help='Load antenna descriptions from file, one per line')
+    parser.add_argument('--cbf-sim-source', dest='cbf_sim_sources', type=parse_source, action='append', default=[], metavar='DESCRIPTION', help='Specify a source object (can be used multiple times)')
+    parser.add_argument('--cbf-sim-source-file', metavar='FILE', help='Load source descriptions from file, one per line')
+    parser.add_argument('--cbf-target', metavar='DESCRIPTION', help='Set initial target')
     parser.add_argument('--port', '-p', type=int, default=7147, help='katcp host port [%(default)s]')
     parser.add_argument('--host', '-a', type=str, default='', help='katcp host address [all hosts]')
     args = parser.parse_args()

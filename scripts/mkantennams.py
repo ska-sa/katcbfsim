@@ -8,23 +8,13 @@ import os
 import numpy as np
 
 
-def get_antennas_katconfig_meerkat():
+def get_antennas_meerkat():
     """Create MeerKAT antennas from katconfig files. This is currently a bit
     nasty (doesn't use the array config) because I couldn't make katconf's
     ArrayConfig work.
     """
-    def make_antenna(num):
-        path = os.path.join('static', 'antennas', 'm{:03}.conf'.format(num))
-        conf = katconf.environ().resource_config(path)
-        diam_str = conf.get('antenna', 'dish_diameter')
-        diam = float(diam_str)
-        pos_str = conf.get('antenna', 'nominal_position')
-        lat, lng, alt = [float(x) for x in pos_str.split(',')]
-        lat = katpoint.deg2rad(lat)
-        lng = katpoint.deg2rad(lng)
-        return katpoint.Antenna('m{:03}'.format(num), lat, lng, alt, diam)
-
-    return [make_antenna(i) for i in range(64)]
+    with open('antennas.txt') as f:
+        return [katpoint.Antenna(x) for x in f]
 
 
 def antenna_desc():
@@ -44,8 +34,7 @@ def antenna_desc():
 
 
 def main():
-    print("WARNING: these positions are probably not accurate (no delay model used)!""")
-    antennas = get_antennas_katconfig_meerkat()
+    antennas = get_antennas_meerkat()
     with tables.table('ANTENNA', antenna_desc(), nrow=len(antennas)) as table:
         table.putcol('NAME', [x.name for x in antennas])
         table.putcol('STATION', ['MEERKAT' for x in antennas])
