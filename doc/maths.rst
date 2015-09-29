@@ -16,7 +16,7 @@ label with index 0.
     (c_p^0 + c_p^1 + \dots + c_p^k) + (d_p^0 + d_p^1 + \dots + d_p^k)i
     \end{pmatrix}
 
-Here subscripts index antennas and subscripts index sources. We will assume
+Here subscripts index antennas and superscripts index sources. We will assume
 that antenna gains are applied after statistical sampling, so that for the
 purposes of this section we can assume that G Jones terms are all the
 identity.
@@ -105,7 +105,19 @@ same for all antennas after gain correction.
 
 For autocorrelations the result is almost the same, except that when computing
 the mean, the noise term must be included in the sum for the non-crosshand
-terms. The expected value 
+terms.
+
+Let us return to covariance, and consider just the covariance between real and
+imaginary parts:
+
+.. math::
+    \begin{align}
+    &E[(a_pa_q + b_pb_q)(b_pa_q-a_pb_q)] - E[a_pa_q+bp_bq]E[b_pa_q-a_pb_q]\\
+    &= E[a_q^2a_pb_p - a_p^2a_qb_q + b_p^2a_qb_q - b_q^2a_pb_p] - 4E[a_pa_q]E[b_pa_q]\\
+    &= 2(E[a_pa_q]E[b_pa_q] - E[a_pa_q]E[a_pb_q] + E[b_pa_q]E[b_pb_q] -
+         E[b_pb_q]E[b_pb_q]) - 4E[a_pa_q]E[b_pa_q]\\
+    &= 4E[a_pa_q]E[b_pa_q].
+    \end{align}
 
 .. [rime] Smirnov, O.M. Revisiting the radio interferometer measurement
    equation. I. A full-sky Jones formalism. A&A 527 A106 (2011).
