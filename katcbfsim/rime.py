@@ -30,6 +30,8 @@ class RimeTemplate(object):
         n_baselines = n_antennas * (n_antennas + 1) // 2
         n_channels = 2048
         n_sources = 32
+        n_accs = 1024
+        sefd = 20.0
         sources = [katpoint.construct_radec_target(0, 0)] * n_sources
         antennas = [katpoint.Antenna('Antenna {}'.format(i),
                                      '-34:00:00', '20:00:00', '0.0', 10.0, (i, 0, 0))
@@ -39,7 +41,7 @@ class RimeTemplate(object):
         gain = accel.DeviceArray(context, (n_channels, n_antennas, 2, 2), np.complex64)
         def generate(wgs):
             fn = cls(context, max_antennas, dict(wgs=wgs)).instantiate(
-                queue, 1412000000.0, 856000000.0, n_channels, sources, antennas)
+                queue, 1412000000.0, 856000000.0, n_channels, n_accs, sources, antennas, sefd)
             fn.bind(out=out, gain=gain)
             return tune.make_measure(queue, fn)
         wgss = [x for x in [32, 64, 128, 256, 512, 1024] if x >= max_antennas]
@@ -52,15 +54,19 @@ class RimeTemplate(object):
 class Rime(accel.Operation):
     def __init__(
             self, template, command_queue,
-            center_frequency, bandwidth, n_channels,
-            sources, antennas, async=False, allocator=None):
+            center_frequency, bandwidth, n_channels, n_accs,
+            sources, antennas, sefd, seed=None, async=False, allocator=None):
         if len(antennas) > template.max_antennas:
             raise ValueError('Too many antennas for the template')
         super(Rime, self).__init__(command_queue, allocator)
         self.template = template
         self.n_channels = n_channels
+        self.n_accs = n_accs
         self.sources = sources
         self.antennas = antennas
+        self.sefd = sefd
+        self.seed = seed if seed is not None else np.random.randint(0, 2**63 - 1)
+        self._sequence = 0
         self.async = async
         n_antennas = len(antennas)
         n_sources = len(sources)
@@ -127,6 +133,7 @@ class Rime(accel.Operation):
         must wait for it to complete before calling the function again.
         """
         logger.debug('Starting update_flex_density')
+        self._flux_sum = np.array([self.sefd, self.sefd], np.float32)
         for channel, freq in enumerate(self.frequencies):
             freq_Mhz = freq / 1e6  # katpoint takes freq in MHz
             for i, source in enumerate(self.sources):
@@ -143,6 +150,8 @@ class Rime(accel.Operation):
                 self._flux_density_host[channel, i, 0, 1] = 0.0
                 self._flux_density_host[channel, i, 1, 0] = 0.0
                 self._flux_density_host[channel, i, 1, 1] = fd
+                self._flux_sum[0] += fd
+                self._flux_sum[1] += fd
         logger.debug('Host flux densities updated')
         self._flux_density.set_async(self.command_queue, self._flux_density_host)
 
@@ -185,18 +194,24 @@ class Rime(accel.Operation):
                 np.int32(out.padded_shape[1]),
                 self._flux_density.buffer,
                 np.int32(self._flux_density.padded_shape[1]),
+                self._flux_sum,
                 gain.buffer,
                 np.int32(gain.padded_shape[1]),
                 self._inv_wavelength.buffer,
                 self._scaled_phase.buffer,
                 self._baselines.buffer,
+                np.float32(self.sefd),
                 np.int32(n_sources),
                 np.int32(n_antennas),
-                np.int32(n_baselines)
+                np.int32(n_baselines),
+                np.float32(self.n_accs),
+                np.uint64(self.seed),
+                np.uint64(self._sequence)
             ],
             global_size=(accel.roundup(n_baselines, self.template.wgs), self.n_channels),
             local_size=(self.template.wgs, 1)
         )
+        self._sequence += 1
         logger.debug('Kernel queued')
         if self.async:
             return transfer_event

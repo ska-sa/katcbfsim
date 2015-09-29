@@ -279,6 +279,8 @@ class FXProduct(object):
         self.center_frequency = 1412000000
         self.accumulation_length = 0.5
         self.time_scale = 1.0
+        self.sefd = 20.0
+        self.seed = 1
         if loop is None:
             self._loop = trollius.get_event_loop()
         else:
@@ -386,7 +388,9 @@ class FXProduct(object):
         template = rime.RimeTemplate(self.context, len(self.subarray.antennas))
         predict = template.instantiate(
             queue, self.center_frequency, self.bandwidth,
-            self.n_channels, self.subarray.sources, self.subarray.antennas, async=True)
+            self.n_channels, self.n_accs,
+            self.subarray.sources, self.subarray.antennas,
+            self.sefd, self.seed, async=True)
         predict.ensure_all_bound()
         # Initialise gains. Eventually this will need to be more sophisticated, but
         # for now it is just real and diagonal.

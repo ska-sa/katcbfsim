@@ -4,6 +4,10 @@
  * Radio Interferometry Measurement Equation
  */
 
+} // extern C
+#include <curand_kernel.h>
+extern "C" {
+
 <%include file="/port.mako"/>
 
 #define MAX_ANTENNAS ${max_antennas}
@@ -63,14 +67,14 @@ DEVICE_FN cplex exp_pi_i(float phase)
     return make_float2(c, s);
 }
 
-// Returns a matrix of zeros
-DEVICE_FN jones jones_zero()
+// Returns an identity matrix scaled by a real scalar
+DEVICE_FN jones jones_init(float diag)
 {
     jones out;
     for (int i = 0; i < 2; i++)
         for (int j = 0; j < 2; j++)
         {
-            out.m[i][j].x = 0;
+            out.m[i][j].x = (i == j) ? diag : 0;
             out.m[i][j].y = 0;
         }
     return out;
@@ -128,6 +132,16 @@ DEVICE_FN int2 to_int(cplex a)
 #endif
 }
 
+DEVICE_FN float sqr(float x)
+{
+    return x * x;
+}
+
+DEVICE_FN float index_float2(float2 f, int idx)
+{
+    return idx == 0 ? f.x : f.y;
+}
+
 /**
  * Compute predicted visibilities. The work division is that axis 0 selects the
  * baseline, axis 1 selects the frequency, and each workgroup must only handle
@@ -139,28 +153,38 @@ DEVICE_FN int2 to_int(cplex a)
  * with valid antenna indices in the padding positions.
  *
  * @param out             Output predicted visibilities, channel-major, int32, xx xy yx yy
- * @param flux_density    Jones matrices for point source apparent brightness, frequency-major
+ * @param flux_density    Jones brightness matrices for point source apparent brightness, frequency-major
+ * @param flux_sum        Diagonal elements of sum of all the brightness matrices and the system equivalent flux density
  * @param gain            Jones matrix per antenna, frequency-major
  * @param inv_wavelength  Inverse of wavelength per channel, in per-metre
  * @param scaled_phase    -2(ul + vm + w(n-1)) per antenna per source (source-major), in metres
  * @param baselines       Indices of the two antennas for each baseline
+ * @param sefd            System Equivalent Flux Density (assumed to be unpolarised)
  * @param n_sources       Number of point sources
  * @param n_antennas      Number of antennas
  * @param n_baselines     Number of baselines
+ * @param n_accs          Number of correlations being summed (in simulation)
+ * @param seed            Random generator seed (keep fixed for a simulation)
+ * @param sequence        Random generator sequence (increment for each call)
  */
 KERNEL void predict(
     GLOBAL ijones * RESTRICT out,
     int out_stride,
     const GLOBAL jones * RESTRICT flux_density,
     int flux_stride,
+    float2 flux_sum,
     const GLOBAL jones * RESTRICT gain,
     int gain_stride,
     const GLOBAL float * RESTRICT inv_wavelength,
     const GLOBAL float * RESTRICT scaled_phase,
     const GLOBAL short2 * RESTRICT baselines,
+    float sefd,
     int n_sources,
     int n_antennas,
-    int n_baselines)
+    int n_baselines,
+    float n_accs,
+    unsigned long long seed,
+    unsigned long long sequence)
 {
     LOCAL_DECL cplex k[MAX_ANTENNAS];
     LOCAL_DECL jones kb[MAX_ANTENNAS];
@@ -172,7 +196,7 @@ KERNEL void predict(
     int p = pq.x;
     int q = pq.y;
     int lid = get_local_id(0);
-    jones sum = jones_zero();
+    jones sum = jones_init(p == q ? sefd : 0);
     for (int source = 0; source < n_sources; source++)
     {
         if (lid < n_antennas)
@@ -189,14 +213,50 @@ KERNEL void predict(
         BARRIER();
     }
 
-    if (b < n_baselines)
-    {
-        int offset = f * gain_stride;
-        jones v = jones_mul_h(jones_mul(gain[offset + p], sum), gain[offset + q]);
-        ijones vi;
-        for (int i = 0; i < 2; i++)
-            for (int j = 0; j < 2; j++)
-                vi.m[i][j] = to_int(v.m[i][j]);
-        out[f * out_stride + b] = vi;
-    }
+    // Done with barriers, so dead lanes can safely exit
+    if (b >= n_baselines)
+        return;
+
+    curandState_t state;
+    curand_init(seed + (sequence << 32) + (f * n_baselines + b) * 8LL, 0, 0, &state);
+    jones v;
+    /* sum gives the mean / expected visibility matrix. We now generate samples
+     * for each of the four visibilities. We ignore correlation between
+     * visibilities, and only consider correlation between the real and
+     * imaginary parts.
+     */
+    for (int i = 0; i < 2; i++)
+        for (int j = 0; j < 2; j++)
+        {
+            // TODO: could precompute
+            float a = 0.5f * n_accs
+                * index_float2(flux_sum, i) * index_float2(flux_sum, j);
+            float b = 0.5f * n_accs * (sqr(sum.m[i][j].x) - sqr(sum.m[i][j].y));
+            float rr = a + b;
+            float ii = a - b;
+            float ri = n_accs * sum.m[i][j].x * sum.m[i][j].y;
+            /* Compute Cholesky factorisation of
+             * [ rr ri ]
+             * [ ri ii ].
+             */
+            float l_rr = sqrt(rr);
+            float l_ri = ri / l_rr;
+            float l_ii = sqrt(ii - l_ri * l_ri);
+            /* Compute the random sample by transforming a pair of standard
+             * normal variables by L and adding the mean.
+             */
+            float2 norm = curand_normal2(&state);
+            v.m[i][j].x = n_accs * sum.m[i][j].x + l_rr * norm.x;
+            v.m[i][j].y = n_accs * sum.m[i][j].y + l_ri * norm.x + l_ii * norm.y;
+        }
+
+    // Apply gains
+    int offset = f * gain_stride;
+    v = jones_mul_h(jones_mul(gain[offset + p], v), gain[offset + q]);
+    // Quantise to integer
+    ijones vi;
+    for (int i = 0; i < 2; i++)
+        for (int j = 0; j < 2; j++)
+            vi.m[i][j] = to_int(v.m[i][j]);
+    out[f * out_stride + b] = vi;
 }
