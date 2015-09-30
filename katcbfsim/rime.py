@@ -12,18 +12,26 @@ logger = logging.getLogger(__name__)
 
 
 class RimeTemplate(object):
+    autotune_version = 1
+
     def __init__(self, context, max_antennas, tuning=None):
         self.context = context
         self.max_antennas = max_antennas
         if tuning is None:
             tuning = self.autotune(context, max_antennas)
-        self.wgs = tuning['wgs']
-        self.program = accel.build(context, 'rime.mako',
+        self.rime_wgs = tuning['rime_wgs']
+        self.rime_program = accel.build(context, 'rime.mako',
             {'max_antennas': max_antennas},
+            extra_dirs=[pkg_resources.resource_filename(__name__, '')])
+        # TODO: tune these as well
+        self.sample_wgs = 256
+        self.sample_rows = 64
+        self.sample_program = accel.build(context, 'sample.mako',
+            {}, 
             extra_dirs=[pkg_resources.resource_filename(__name__, '')])
 
     @classmethod
-    @tune.autotuner(test={'wgs': 64})
+    @tune.autotuner(test={'rime_wgs': 64})
     def autotune(cls, context, max_antennas):
         queue = context.create_tuning_command_queue()
         n_antennas = max_antennas
@@ -39,13 +47,13 @@ class RimeTemplate(object):
         # The values are irrelevant, we just need the memory to be there.
         out = accel.DeviceArray(context, (n_channels, n_baselines, 2, 2, 2), np.int32)
         gain = accel.DeviceArray(context, (n_channels, n_antennas, 2, 2), np.complex64)
-        def generate(wgs):
-            fn = cls(context, max_antennas, dict(wgs=wgs)).instantiate(
+        def generate(rime_wgs):
+            fn = cls(context, max_antennas, dict(rime_wgs=rime_wgs)).instantiate(
                 queue, 1412000000.0, 856000000.0, n_channels, n_accs, sources, antennas, sefd)
             fn.bind(out=out, gain=gain)
             return tune.make_measure(queue, fn)
         wgss = [x for x in [32, 64, 128, 256, 512, 1024] if x >= max_antennas]
-        return tune.autotune(generate, wgs=wgss)
+        return tune.autotune(generate, rime_wgs=wgss)
 
     def instantiate(self, *args, **kwargs):
         return Rime(self, *args, **kwargs)
@@ -71,13 +79,16 @@ class Rime(accel.Operation):
         n_antennas = len(antennas)
         n_sources = len(sources)
         n_baselines = n_antennas * (n_antennas + 1) // 2
-        n_padded_baselines = accel.roundup(n_baselines, template.wgs)
+        n_padded_baselines = max(
+            accel.roundup(n_baselines, template.rime_wgs),
+            accel.roundup(n_baselines, template.sample_wgs))
         self.time = katpoint.Timestamp()
         self.phase_center = katpoint.construct_radec_target(0, 0)
         _2 = accel.Dimension(2, exact=True)
         self.slots['out'] = accel.IOSlot((n_channels, n_baselines, _2, _2, _2), np.int32)
         self.slots['gain'] = accel.IOSlot((n_channels, n_antennas, _2, _2), np.complex64)
-        self.kernel = template.program.get_kernel('predict')
+        self.rime_kernel = template.rime_program.get_kernel('predict')
+        self.sample_kernel = template.sample_program.get_kernel('sample')
         # Set up the inverse wavelength lookup table
         self._inv_wavelength = accel.DeviceArray(command_queue.context, (n_channels,), np.float32)
         channel_width = bandwidth / n_channels
@@ -188,15 +199,12 @@ class Rime(accel.Operation):
         n_sources = len(self.sources)
         n_baselines = n_antennas * (n_antennas + 1) // 2
         self.command_queue.enqueue_kernel(
-            self.kernel,
+            self.rime_kernel,
             [
                 out.buffer,
                 np.int32(out.padded_shape[1]),
                 self._flux_density.buffer,
                 np.int32(self._flux_density.padded_shape[1]),
-                self._flux_sum,
-                gain.buffer,
-                np.int32(gain.padded_shape[1]),
                 self._inv_wavelength.buffer,
                 self._scaled_phase.buffer,
                 self._baselines.buffer,
@@ -204,12 +212,28 @@ class Rime(accel.Operation):
                 np.int32(n_sources),
                 np.int32(n_antennas),
                 np.int32(n_baselines),
+            ],
+            global_size=(accel.roundup(n_baselines, self.template.rime_wgs), self.n_channels),
+            local_size=(self.template.rime_wgs, 1)
+        )
+        self.command_queue.enqueue_kernel(
+            self.sample_kernel,
+            [
+                out.buffer,
+                np.int32(out.padded_shape[1]),
+                self._flux_sum,
+                gain.buffer,
+                np.int32(gain.padded_shape[1]),
+                self._baselines.buffer,
+                np.int32(self.n_channels),
+                np.int32(n_baselines),
                 np.float32(self.n_accs),
                 np.uint64(self.seed),
                 np.uint64(self._sequence)
             ],
-            global_size=(accel.roundup(n_baselines, self.template.wgs), self.n_channels),
-            local_size=(self.template.wgs, 1)
+            global_size=(accel.roundup(n_baselines, self.template.sample_wgs),
+                         min(self.template.sample_rows, self.n_channels)),
+            local_size=(self.template.sample_wgs, 1)
         )
         self._sequence += 1
         logger.debug('Kernel queued')
