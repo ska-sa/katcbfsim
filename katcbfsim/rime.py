@@ -20,7 +20,7 @@ class RimeTemplate(object):
         if tuning is None:
             tuning = self.autotune(context, max_antennas)
         self.predict_wgs = tuning['predict_wgs']
-        self.predict_program = accel.build(context, 'rime.mako',
+        self.predict_program = accel.build(context, 'predict.mako',
             {'max_antennas': max_antennas},
             extra_dirs=[pkg_resources.resource_filename(__name__, '')])
         # TODO: tune these as well
