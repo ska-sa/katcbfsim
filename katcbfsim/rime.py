@@ -235,7 +235,8 @@ class Rime(accel.Operation):
             [
                 out.buffer,
                 np.int32(out.padded_shape[1]),
-                self._flux_sum,
+                self._flux_sum[0],
+                self._flux_sum[1],
                 gain.buffer,
                 np.int32(gain.padded_shape[1]),
                 self._baselines.buffer,

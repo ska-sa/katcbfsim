@@ -10,11 +10,6 @@ DEVICE_FN float sqr(float x)
     return x * x;
 }
 
-DEVICE_FN float index_float2(float2 f, int idx)
-{
-    return idx == 0 ? f.x : f.y;
-}
-
 DEVICE_FN int2 to_int(cplex a)
 {
 #ifdef __OPENCL_VERSION__
@@ -58,7 +53,8 @@ typedef union
 KERNEL void sample(
     GLOBAL in_out * RESTRICT data,
     int data_stride,
-    float2 flux_sum,
+    float flux_sum_x,
+    float flux_sum_y,
     const GLOBAL jones * RESTRICT gain,
     int gain_stride,
     const GLOBAL short2 * RESTRICT baselines,
@@ -88,6 +84,7 @@ KERNEL void sample(
     seed += ((sequence * f_step + f) * n_baselines + b) * 1099511628211ULL;
     curandState_t state;
     curand_init(seed, 0, 0, &state);
+    float flux_sum[2] = {flux_sum_x, flux_sum_y};
 
     for (; f < n_channels; f += f_step)
     {
@@ -98,8 +95,7 @@ KERNEL void sample(
             for (int j = 0; j < 2; j++)
             {
                 // TODO: could precompute
-                float a = 0.5f * n_accs
-                    * index_float2(flux_sum, i) * index_float2(flux_sum, j);
+                float a = 0.5f * n_accs * flux_sum[i] * flux_sum[j];
                 float b = 0.5f * n_accs * (sqr(predict.m[i][j].x) - sqr(predict.m[i][j].y));
                 float rr = a + b;
                 float ii = a - b;
