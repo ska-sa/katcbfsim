@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class RimeTemplate(object):
-    autotune_version = 1
+    autotune_version = 2
 
     def __init__(self, context, max_antennas, tuning=None):
         self.context = context
@@ -23,15 +23,14 @@ class RimeTemplate(object):
         self.predict_program = accel.build(context, 'predict.mako',
             {'max_antennas': max_antennas},
             extra_dirs=[pkg_resources.resource_filename(__name__, '')])
-        # TODO: tune these as well
-        self.sample_wgs = 256
-        self.sample_rows = 64
+        self.sample_wgs = tuning['sample_wgs']
+        self.sample_rows = tuning['sample_rows']
         self.sample_program = accel.build(context, 'sample.mako',
             {}, 
             extra_dirs=[pkg_resources.resource_filename(__name__, '')])
 
     @classmethod
-    @tune.autotuner(test={'predict_wgs': 64})
+    @tune.autotuner(test={'predict_wgs': 64, 'sample_wgs': 256, 'sample_rows': 64})
     def autotune(cls, context, max_antennas):
         queue = context.create_tuning_command_queue()
         n_antennas = max_antennas
@@ -47,14 +46,29 @@ class RimeTemplate(object):
         # The values are irrelevant, we just need the memory to be there.
         out = accel.DeviceArray(context, (n_channels, n_baselines, 2, 2, 2), np.int32)
         gain = accel.DeviceArray(context, (n_channels, n_antennas, 2, 2), np.complex64)
-        def generate(predict_wgs):
-            fn = cls(context, max_antennas, dict(predict_wgs=predict_wgs)).instantiate(
+        def generate_predict(predict_wgs):
+            tuning = dict(predict_wgs=predict_wgs, sample_wgs=256, sample_rows=64)
+            fn = cls(context, max_antennas, tuning).instantiate(
                 queue, 1412000000.0, 856000000.0, n_channels, n_accs, sources, antennas, sefd)
             fn.bind(out=out, gain=gain)
             fn._update_scaled_phase()
+            queue.finish()  # _update_scaled_phase is asynchronous
             return tune.make_measure(queue, fn._run_predict)
-        wgss = [x for x in [32, 64, 128, 256, 512, 1024] if x >= max_antennas]
-        return tune.autotune(generate, predict_wgs=wgss)
+        def generate_sample(sample_wgs, sample_rows):
+            tuning = dict(predict_wgs=64, sample_wgs=sample_wgs, sample_rows=sample_rows)
+            fn = cls(context, max_antennas, tuning).instantiate(
+                queue, 1412000000.0, 856000000.0, n_channels, n_accs, sources, antennas, sefd)
+            fn.bind(out=out, gain=gain)
+            fn._update_scaled_phase()
+            fn._run_predict()
+            queue.finish()  # _update_scaled_phase is asynchronous
+            return tune.make_measure(queue, fn._run_sample)
+        wgss = [x for x in [64, 128, 256, 512, 1024] if x >= max_antennas]
+        tuning = {}
+        tuning.update(tune.autotune(generate_predict, predict_wgs=wgss))
+        tuning.update(tune.autotune(generate_sample, sample_wgs=wgss,
+            sample_rows=[16, 64, 256]))
+        return tuning
 
     def instantiate(self, *args, **kwargs):
         return Rime(self, *args, **kwargs)
