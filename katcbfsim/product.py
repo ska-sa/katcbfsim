@@ -276,7 +276,7 @@ class FXProduct(object):
         self.adc_rate = adc_rate
         self.bandwidth = bandwidth
         self.n_channels = n_channels
-        self.center_frequency = 1412000000
+        self.center_frequency = 1284000000
         self.accumulation_length = 0.5
         self.time_scale = 1.0
         self.sefd = 20.0

@@ -49,7 +49,7 @@ class RimeTemplate(object):
         def generate_predict(predict_wgs):
             tuning = dict(predict_wgs=predict_wgs, sample_wgs=256, sample_rows=64)
             fn = cls(context, max_antennas, tuning).instantiate(
-                queue, 1412000000.0, 856000000.0, n_channels, n_accs, sources, antennas, sefd)
+                queue, 1284000000.0, 856000000.0, n_channels, n_accs, sources, antennas, sefd)
             fn.bind(out=out, gain=gain)
             fn._update_scaled_phase()
             queue.finish()  # _update_scaled_phase is asynchronous
@@ -57,7 +57,7 @@ class RimeTemplate(object):
         def generate_sample(sample_wgs, sample_rows):
             tuning = dict(predict_wgs=64, sample_wgs=sample_wgs, sample_rows=sample_rows)
             fn = cls(context, max_antennas, tuning).instantiate(
-                queue, 1412000000.0, 856000000.0, n_channels, n_accs, sources, antennas, sefd)
+                queue, 1284000000.0, 856000000.0, n_channels, n_accs, sources, antennas, sefd)
             fn.bind(out=out, gain=gain)
             fn._update_scaled_phase()
             fn._run_predict()
