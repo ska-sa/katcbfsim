@@ -26,7 +26,7 @@ class RimeTemplate(object):
         self.sample_wgs = tuning['sample_wgs']
         self.sample_rows = tuning['sample_rows']
         self.sample_program = accel.build(context, 'sample.mako',
-            {}, 
+            {},
             extra_dirs=[pkg_resources.resource_filename(__name__, '')])
 
     @classmethod
