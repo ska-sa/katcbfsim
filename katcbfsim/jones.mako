@@ -88,7 +88,7 @@ DEVICE_FN jones jones_mul_h(jones a, jones b)
     jones out;
     for (int i = 0; i < 2; i++)
         for (int j = 0; j < 2; j++)
-            out.m[i][j] = cadd(cmul_conj(a.m[i][0], b.m[j][0]), cmul_conj(a.m[i][1], b.m[j][i]));
+            out.m[i][j] = cadd(cmul_conj(a.m[i][0], b.m[j][0]), cmul_conj(a.m[i][1], b.m[j][1]));
     return out;
 }
 
