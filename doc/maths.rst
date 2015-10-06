@@ -112,10 +112,10 @@ imaginary parts:
 
 .. math::
     \begin{align}
-    &E[4(a_pa_q + b_pb_q)(b_pa_q-a_pb_q)] - E[2(a_pa_q+bp_bq)]E[2(b_pa_q-a_pb_q)]\\
+    &E[4(a_pa_q + b_pb_q)(b_pa_q-a_pb_q)] - E[2(a_pa_q+b_pb_q)]E[2(b_pa_q-a_pb_q)]\\
     &= 4E[a_q^2a_pb_p - a_p^2a_qb_q + b_p^2a_qb_q - b_q^2a_pb_p] - 16E[a_pa_q]E[b_pa_q]\\
     &= 8(E[a_pa_q]E[b_pa_q] - E[a_pa_q]E[a_pb_q] + E[b_pa_q]E[b_pb_q] -
-         E[b_pb_q]E[b_pb_q]) - 16E[a_pa_q]E[b_pa_q]\\
+         E[b_pb_q]E[a_pb_q]) - 16E[a_pa_q]E[b_pa_q]\\
     &= 16E[a_pa_q]E[b_pa_q].
     \end{align}
 
