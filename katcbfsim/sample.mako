@@ -94,19 +94,23 @@ KERNEL void sample(
         for (int i = 0; i < 2; i++)
             for (int j = 0; j < 2; j++)
             {
-                // TODO: could precompute
-                float a = 0.5f * n_accs * flux_sum[i] * flux_sum[j];
-                float b = 0.5f * n_accs * (sqr(predict.m[i][j].x) - sqr(predict.m[i][j].y));
-                float rr = a + b;
-                float ii = a - b;
+                // TODO: could precompute A.
+                float A = 0.5f * n_accs * flux_sum[i] * flux_sum[j];
+                float B = 0.5f * n_accs * (sqr(predict.m[i][j].x) - sqr(predict.m[i][j].y));
+                float rr = A + B;
+                float ii = A - B;
                 float ri = n_accs * predict.m[i][j].x * predict.m[i][j].y;
                 /* Compute Cholesky factorisation of
                  * [ rr ri ]
                  * [ ri ii ].
+                 * In some cases, particularly autocorrelations, numeric
+                 * instabilities cause tiny negative values, which spoils the
+                 * positive semi-definite nature; which is why we guard the
+                 * second sqrt with a max(0, ...).
                  */
                 float l_rr = sqrt(rr);
                 float l_ri = ri / l_rr;
-                float l_ii = sqrt(ii - l_ri * l_ri);
+                float l_ii = sqrt(max(0.0, ii - l_ri * l_ri));
                 /* Compute the random sample by transforming a pair of standard
                  * normal variables by L and adding the mean.
                  */
