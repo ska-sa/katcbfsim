@@ -36,7 +36,7 @@ def main():
     antennas = get_antennas_katconfig_meerkat()
     sources = [katpoint.construct_radec_target(katpoint.deg2rad(18 + i), katpoint.deg2rad(-34))
                for i in range(64)]
-    fn = template.instantiate(queue, 1412000000, 856000000, 32768, sources, antennas)
+    fn = template.instantiate(queue, 1284000000, 856000000, 32768, sources, antennas)
     fn.ensure_all_bound()
     fn.set_phase_center(sources[0])
     for i in range(10):

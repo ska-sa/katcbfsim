@@ -40,7 +40,7 @@ The covariance matrix of these elements has some important properties:
 The visibility matrix for antennas :math:`p` and :math:`q` is
 
 .. math::
-  \begin{pmatrix}
+  2\begin{pmatrix}
   (a_pa_q+b_pb_q) + (b_pa_q-a_pb_q)i & (a_pc_q+b_pd_q) + (b_pc_q-a_pd_q)i\\
   (c_pa_q+d_pb_q) + (d_pa_q-c_pb_q)i & (c_pc_q+d_pd_q) + (d_pc_q-c_pd_q)i
   \end{pmatrix}.
@@ -55,30 +55,30 @@ sources, most terms disappear under the assumptions of independence, giving an
 expected value of
 
 .. math::
-  \sum_j E\begin{pmatrix}
+  2\sum_j E\begin{pmatrix}
     (a_p^ja_q^j+b_p^jb_q^j) + (b_p^ja_q^j-a_p^jb_q^j)i
     & (a_p^jc_q^j+b_p^jd_q^j) + (b_p^jc_q^j-a_p^jd_q^j)i\\
     (c_p^ja_q^j+d_p^jb_q^j) + (d_p^ja_q^j-c_p^jb_q^j)i
     & (c_p^jc_q^j+d_p^jd_q^j) + (d_p^jc_q^j-c_p^jd_q^j)i
   \end{pmatrix}.
 
-The terms in this sum are exactly half [rime]_ the source coherencies, and can be
-predicted from the RIME.
+The terms in this sum are exactly the source coherencies, and can be
+predicted from the RIME [rime]_.
 
 Next, let us compute variance for the visibility matrix, using Isserlis'
 Theorem:
 
 .. math::
     \begin{align}
-    & E[(a_pa_q + b_pb_q)^2] - E[a_pa_q + b_pb_q]^2\\
-    &= E[a_p^2a_q^2] + 2E[a_pa_qb_pb_q] + E[b_p^2b_q^2] - (E[a_pa_q]^2 +
+    & E[(2a_pa_q + 2b_pb_q)^2] - E[2a_pa_q + 2b_pb_q]^2\\
+    &= 4E[a_p^2a_q^2] + 8E[a_pa_qb_pb_q] + 4E[b_p^2b_q^2] - 4(E[a_pa_q]^2 +
        2E[a_pa_q]E[b_pb_q] + E[b_pb_q]^2)\\
-    &= E[a_p^2]E[a_q^2] + 2E[a_pa_q]^2 + 2(
+    &= 4E[a_p^2]E[a_q^2] + 8E[a_pa_q]^2 + 8(
         E[a_pa_q]E[b_pb_q] + E[a_pb_p]E[a_qb_q] + E[a_pb_q]E[a_qb_p])
-     + E[b_p^2]E[b_q^2] + 2E[b_pb_q]^2
-     - (E[a_pa_q]^2 + 2E[a_pa_q]E[b_pb_q] + E[b_pb_q]^2)\\
-    &= E[a_p^2]E[a_q^2] + E[b_p^2]E[b_q^2] + E[a_pa_q]^2 + E[b_pb_q]^2 + 2E[a_pb_q]E[a_qb_p]\\
-    &= 2E[a_p^2]E[a_q^2] + 2E[a_pa_q]^2 - 2E[a_pb_q]^2.
+     + 4E[b_p^2]E[b_q^2] + 8E[b_pb_q]^2
+     - 4(E[a_pa_q]^2 + 2E[a_pa_q]E[b_pb_q] + E[b_pb_q]^2)\\
+    &= 4E[a_p^2]E[a_q^2] + 4E[b_p^2]E[b_q^2] + 4E[a_pa_q]^2 + 4E[b_pb_q]^2 + 8E[a_pb_q]E[a_qb_p]\\
+    &= 8E[a_p^2]E[a_q^2] + 8E[a_pa_q]^2 - 8E[a_pb_q]^2.
     \end{align}
 
 Variances for the other seven terms can be computed similarly by substituting
@@ -112,11 +112,11 @@ imaginary parts:
 
 .. math::
     \begin{align}
-    &E[(a_pa_q + b_pb_q)(b_pa_q-a_pb_q)] - E[a_pa_q+bp_bq]E[b_pa_q-a_pb_q]\\
-    &= E[a_q^2a_pb_p - a_p^2a_qb_q + b_p^2a_qb_q - b_q^2a_pb_p] - 4E[a_pa_q]E[b_pa_q]\\
-    &= 2(E[a_pa_q]E[b_pa_q] - E[a_pa_q]E[a_pb_q] + E[b_pa_q]E[b_pb_q] -
-         E[b_pb_q]E[b_pb_q]) - 4E[a_pa_q]E[b_pa_q]\\
-    &= 4E[a_pa_q]E[b_pa_q].
+    &E[4(a_pa_q + b_pb_q)(b_pa_q-a_pb_q)] - E[2(a_pa_q+b_pb_q)]E[2(b_pa_q-a_pb_q)]\\
+    &= 4E[a_q^2a_pb_p - a_p^2a_qb_q + b_p^2a_qb_q - b_q^2a_pb_p] - 16E[a_pa_q]E[b_pa_q]\\
+    &= 8(E[a_pa_q]E[b_pa_q] - E[a_pa_q]E[a_pb_q] + E[b_pa_q]E[b_pb_q] -
+         E[b_pb_q]E[a_pb_q]) - 16E[a_pa_q]E[b_pa_q]\\
+    &= 16E[a_pa_q]E[b_pa_q].
     \end{align}
 
 .. [rime] Smirnov, O.M. Revisiting the radio interferometer measurement
