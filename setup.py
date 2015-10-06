@@ -10,6 +10,6 @@ setup(
     description='Simulator for MeerKAT correlator',
     install_requires=['katcp', 'trollius', 'tornado>=4.2', 'spead2', 'katpoint', 'numpy', 'h5py',
         'katsdpsigproc', 'pycuda'],
-    tests_require=['nose'],
+    tests_require=['nose', 'scipy'],
     packages=['katcbfsim']
 )
