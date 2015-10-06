@@ -32,7 +32,7 @@ def boxm_test(*args):
     p-value : float
         The p-value of the test
     """
-    Si = [np.cov(x) for x in args]
+    Si = [np.atleast_2d(np.cov(x)) for x in args]
     ni = [x.shape[1] for x in args]
     k = len(Si[0])
     m = len(Si)
@@ -159,20 +159,18 @@ class TestRime(object):
                             expected = np.array([expected.real, expected.imag])
                             # Special case for autocorrelations: the value will be
                             # purely real, making the covariance matrix singular,
-                            # where boxm_test breaks down.
+                            # where boxm_test and ttest_1samp break down.
                             if i == j and k == l:
                                 assert_true(np.all(cur[1, ...] == 0))
                                 assert_true(np.all(ds[1, ...] == 0))
-                                result = scipy.stats.bartlett(cur[0, ...], ds[0, ...])
-                                assert_greater(result.pvalue, threshold1)
-                                result = scipy.stats.ttest_1samp(ds[0, ...], expected[0])
-                                assert_greater(result.pvalue, threshold1)
-                            else:
-                                result = boxm_test(cur, ds)
-                                assert_greater(result.pvalue, threshold1)
-                                result = scipy.stats.ttest_1samp(ds, expected, axis=1)
-                                assert_greater(result.pvalue[0], threshold1)
-                                assert_greater(result.pvalue[1], threshold1)
+                                cur = cur[0:1]
+                                ds = ds[0:1]
+                                expected = expected[0:1]
+                            result = boxm_test(cur, ds)
+                            assert_greater(result.pvalue, threshold1)
+                            result = scipy.stats.ttest_1samp(ds, expected, axis=1)
+                            for p in np.atleast_1d(result.pvalue):
+                                assert_greater(p, threshold1)
                     baseline_index += 1
 
     @device_test
