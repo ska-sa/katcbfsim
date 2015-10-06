@@ -8,6 +8,7 @@ setup(
     name='katcbfsim',
     version='0.1.dev0',
     description='Simulator for MeerKAT correlator',
+    scripts=['scripts/cbfsim.py'],
     install_requires=['katcp', 'trollius', 'tornado>=4.2', 'spead2', 'katpoint', 'numpy', 'h5py',
         'katsdpsigproc', 'katsdptelstate', 'pycuda'],
     tests_require=['nose', 'scipy'],
