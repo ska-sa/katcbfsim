@@ -4,9 +4,51 @@ from __future__ import print_function, division
 from katsdpsigproc import accel
 from katsdpsigproc.test.test_accel import device_test, force_autotune
 from katcbfsim import rime
+from nose.tools import *
 import katpoint
 import numpy as np
 import scipy.stats
+from collections import namedtuple
+
+
+def boxm_test(*args):
+    """Box M Test for equal covariance matrices. This is a generalisation of
+    :func:`scipy.stats.bartlett` for multivariate variables. The formulae are
+    taken from here__.
+
+    __ http://www.real-statistics.com/multivariate-statistics/boxs-test-equality-covariance-matrices/boxs-test-basic-concepts/
+
+    Parameters
+    ----------
+    sample1, sample2, ... : array-like
+        arrays of sample data. Each row represents a variable, with
+        observations in the columns, as for :func:`numpy.cov`. The samples need
+        not have the same number of observations.
+
+    Returns
+    -------
+    T : float
+        The test statistic
+    p-value : float
+        The p-value of the test
+    """
+    Si = [np.cov(x) for x in args]
+    ni = [x.shape[1] for x in args]
+    k = len(Si[0])
+    m = len(Si)
+    n = sum(ni)
+    if n <= m:
+        raise ValueError('Too few samples')
+    S = sum((nj - 1) * Sj for nj, Sj in zip(ni, Si)) / (n - m)
+    M = (n - m) * np.log(np.linalg.det(S))
+    M -= sum((nj - 1) * np.log(np.linalg.det(Sj)) for nj, Sj in zip(ni, Si))
+    scale = (2 * k**2 + 3 * k - 1) / ((6 * (k + 1) * (m - 1)))
+    c = scale * sum(1 / (nj - 1) - 1 / (n - m) for nj in ni)
+    T = M * (1 - c)
+    df = k * (k + 1) * (m - 1) / 2
+    pval = scipy.stats.chi2.sf(T, df)
+    BoxmResult = namedtuple('BoxmResult', ('statistic', 'pvalue'))
+    return BoxmResult(T, pval)
 
 
 class TestRime(object):
@@ -23,7 +65,13 @@ class TestRime(object):
         n_baselines = n_antennas * (n_antennas + 1) // 2
         n_channels = 4
         n_accs = 400
-        n_samples = 100000
+        n_samples = 1000
+        threshold = 0.01  # Overall probability that the test will randomly fail
+        # Threshold for each p test. There are n_channels * n_baselines * 4
+        # visibilities, and we compute 3 p-values for each, except for autos
+        # where we only compute two.
+        tests = n_channels * (n_baselines * 4 * 3 - n_antennas * 2)
+        threshold1 = 1 - (1 - threshold)**(1 / tests)
         allocator = accel.DeviceAllocator(context)
         raw = allocator.allocate_raw(n_channels * n_baselines * 4 * 8)
         # in_data and out_data both alias raw, since _run_sample runs in-place
@@ -105,16 +153,26 @@ class TestRime(object):
                         for l in range(2):
                             cur = samples[2 * i + k, 2 * j + l, ...]
                             ds = device_samples[channel, baseline_index, k, l, ...]
-                            cur = np.c_[cur.real, cur.imag]
-                            ds = np.c_[ds.real, ds.imag]
+                            cur = np.c_[cur.real, cur.imag].T
+                            ds = np.c_[ds.real, ds.imag].T
                             expected = V[2 * i + k, 2 * j + l] * n_accs
                             expected = np.array([expected.real, expected.imag])
-                            print(i, j, k, l)
-                            print("mean (h)", np.mean(cur, axis=0))
-                            print("mean (d)", np.mean(ds, axis=0))
-                            print("expected", expected)
-                            print("cov (h)", np.cov(cur, rowvar=0))
-                            print("cov (d)", np.cov(ds, rowvar=0))
+                            # Special case for autocorrelations: the value will be
+                            # purely real, making the covariance matrix singular,
+                            # where boxm_test breaks down.
+                            if i == j and k == l:
+                                assert_true(np.all(cur[1, ...] == 0))
+                                assert_true(np.all(ds[1, ...] == 0))
+                                result = scipy.stats.bartlett(cur[0, ...], ds[0, ...])
+                                assert_greater(result.pvalue, threshold1)
+                                result = scipy.stats.ttest_1samp(ds[0, ...], expected[0])
+                                assert_greater(result.pvalue, threshold1)
+                            else:
+                                result = boxm_test(cur, ds)
+                                assert_greater(result.pvalue, threshold1)
+                                result = scipy.stats.ttest_1samp(ds, expected, axis=1)
+                                assert_greater(result.pvalue[0], threshold1)
+                                assert_greater(result.pvalue[1], threshold1)
                     baseline_index += 1
 
     @device_test
