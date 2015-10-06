@@ -103,14 +103,10 @@ KERNEL void sample(
                 /* Compute Cholesky factorisation of
                  * [ rr ri ]
                  * [ ri ii ].
-                 * In some cases, particularly autocorrelations, numeric
-                 * instabilities cause tiny negative values, which spoils the
-                 * positive semi-definite nature; which is why we guard the
-                 * second sqrt with a max(0, ...).
                  */
                 float l_rr = sqrt(rr);
                 float l_ri = ri / l_rr;
-                float l_ii = sqrt(max(0.0, ii - l_ri * l_ri));
+                float l_ii = sqrt(ii - l_ri * l_ri);
                 /* Compute the random sample by transforming a pair of standard
                  * normal variables by L and adding the mean.
                  */
@@ -118,6 +114,18 @@ KERNEL void sample(
                 sample.m[i][j].x = n_accs * predict.m[i][j].x + l_rr * norm.x;
                 sample.m[i][j].y = n_accs * predict.m[i][j].y + l_ri * norm.x + l_ii * norm.y;
             }
+
+        /* Autocorrelations must be Hermitian.
+         * TODO: probably more efficient to have a separate kernel
+         * to fix up the autocorrelations afterwards.
+         */
+        if (p == q)
+        {
+            sample.m[0][0].y = 0.0;
+            sample.m[1][1].y = 0.0;
+            sample.m[1][0].x = sample.m[0][1].x;
+            sample.m[1][0].y = -sample.m[0][1].y;
+        }
 
         // Apply gains
         int offset = f * gain_stride;

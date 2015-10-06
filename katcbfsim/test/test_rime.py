@@ -149,6 +149,11 @@ class TestRime(object):
             baseline_index = 0
             for i in range(n_antennas):
                 for j in range(i, n_antennas):
+                    if i == j:
+                        np.testing.assert_array_equal(
+                            device_samples[channel, baseline_index, 0, 1, ...],
+                            np.conj(device_samples[channel, baseline_index, 1, 0, ...]),
+                            "Autocorrelation is not Hermitian")
                     for k in range(2):
                         for l in range(2):
                             cur = samples[2 * i + k, 2 * j + l, ...]
