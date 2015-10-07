@@ -16,6 +16,6 @@ setup(
     install_requires=['katcp', 'trollius', 'tornado>=4.2', 'spead2', 'katpoint', 'numpy', 'h5py',
         'katsdpsigproc[CUDA]', 'katsdptelstate'],
     tests_require=tests_require,
-    extras_require={'test': tests_require},
+    extras_require={'test': tests_require, 'doc': ['sphinx', 'sphinxcontrib-napoleon']},
     packages=['katcbfsim']
 )
