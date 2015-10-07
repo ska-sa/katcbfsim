@@ -14,7 +14,7 @@ setup(
     description='Simulator for MeerKAT correlator',
     scripts=['scripts/cbfsim.py'],
     install_requires=['katcp', 'trollius', 'tornado>=4.2', 'spead2', 'katpoint', 'numpy', 'h5py',
-        'katsdpsigproc', 'katsdptelstate', 'pycuda'],
+        'katsdpsigproc[CUDA]', 'katsdptelstate'],
     tests_require=tests_require,
     extras_require={'test': tests_require},
     packages=['katcbfsim']

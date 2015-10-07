@@ -1,0 +1,5 @@
+# Only contains requirements that pip install . won't find
+git+ssh://git@github.com/ska-sa/katcp-python#katcp
+git+ssh://git@github.com/ska-sa/katpoint
+git+ssh://git@github.com/ska-sa/katsdptelstate
+git+ssh://git@github.com/ska-sa/katsdpsigproc
