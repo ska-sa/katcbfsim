@@ -2,9 +2,10 @@
 
 from __future__ import print_function, division
 import trollius
+from trollius import From
 import tornado
 import tornado.gen
-from tornado.platform.asyncio import AsyncIOMainLoop
+from tornado.platform.asyncio import AsyncIOMainLoop, to_asyncio_future
 import signal
 import argparse
 import logging
@@ -15,10 +16,10 @@ import katsdptelstate
 import katpoint
 
 
-@tornado.gen.coroutine
+@trollius.coroutine
 def on_shutdown(server):
     print('Shutting down')
-    yield server.stop()
+    yield From(to_asyncio_future(server.stop()))
     trollius.get_event_loop().stop()
 
 
@@ -110,8 +111,10 @@ def main():
     prepare_server(server, args)
     server.set_concurrency_options(thread_safe=False, handler_thread=False)
     server.set_ioloop(ioloop)
-    signal.signal(signal.SIGINT, lambda sig, frame: ioloop.add_callback_from_signal(
-        on_shutdown, server))
+    trollius.get_event_loop().add_signal_handler(signal.SIGINT,
+        lambda: trollius.async(on_shutdown(server)))
+    trollius.get_event_loop().add_signal_handler(signal.SIGTERM,
+        lambda: trollius.async(on_shutdown(server)))
     ioloop.add_callback(server.start)
     trollius.get_event_loop().run_forever()
 
