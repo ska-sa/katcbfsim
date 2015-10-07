@@ -2,6 +2,8 @@
 
 from setuptools import setup
 
+tests_require=['nose', 'scipy']
+
 setup(
     author='Bruce Merry',
     author_email='bmerry@ska.ac.za',
@@ -13,6 +15,7 @@ setup(
     scripts=['scripts/cbfsim.py'],
     install_requires=['katcp', 'trollius', 'tornado>=4.2', 'spead2', 'katpoint', 'numpy', 'h5py',
         'katsdpsigproc', 'katsdptelstate', 'pycuda'],
-    tests_require=['nose', 'scipy'],
+    tests_require=tests_require,
+    extras_require={'test': tests_require},
     packages=['katcbfsim']
 )
