@@ -11,6 +11,7 @@ import scipy.stats
 from collections import namedtuple
 
 
+@nottest
 def boxm_test(*args):
     """Box M Test for equal covariance matrices. This is a generalisation of
     :func:`scipy.stats.bartlett` for multivariate variables. The formulae are
