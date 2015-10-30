@@ -75,11 +75,21 @@ def prepare_server(server, args):
         server.set_destination(product, [args.cbf_spead])
         if args.start:
             server.capture_start(product)
+    if args.create_beamformer_product is not None:
+        product = server.add_beamformer_product(args.create_beamformer_product,
+            args.cbf_adc_sample_rate, args.cbf_bandwidth, args.cbf_channels,
+            args.beamformer_timesteps, args.beamformer_bits)
+        server.set_center_frequency(product, args.cbf_center_freq)
+        server.set_destination(product, [args.cbf_spead])
+        if args.start:
+            server.capture_start(product)
 
 
 def main():
     parser = katsdptelstate.ArgumentParser()
-    parser.add_argument('--create-fx-product', type=str, metavar='NAME', help='Create a correlator product without prompting from katcp')
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('--create-fx-product', type=str, metavar='NAME', help='Create a correlator product without prompting from katcp')
+    group.add_argument('--create-beamformer-product', type=str, metavar='NAME', help='Create a beamformer product without prompting from katcp')
     parser.add_argument('--start', action='store_true', help='Start the defined products')
     parser.add_argument('--cbf-channels', type=int, default=32768, metavar='N', help='Number of channels [%(default)s]')
     parser.add_argument('--cbf-adc-sample-rate', type=int, default=1712000000, metavar='HZ', help='ADC rate [%(default)s]'),
@@ -93,11 +103,13 @@ def main():
     parser.add_argument('--cbf-sim-source', dest='cbf_sim_sources', type=parse_source, action='append', default=[], metavar='DESCRIPTION', help='Specify a source object (can be used multiple times)')
     parser.add_argument('--cbf-sim-source-file', metavar='FILE', help='Load source descriptions from file, one per line')
     parser.add_argument('--cbf-target', metavar='DESCRIPTION', help='Set initial target')
+    parser.add_argument('--beamformer-timesteps', metavar='TIMES', type=int, default=256, help='Spectra included in each beamformer heap [%(default)s]')
+    parser.add_argument('--beamformer-bits', metavar='BITS', type=int, choices=[8, 16, 32], default=8, help='Bits per real value in beamformer data [%(default)s]')
     parser.add_argument('--port', '-p', type=int, default=7147, help='katcp host port [%(default)s]')
     parser.add_argument('--host', '-a', type=str, default='', help='katcp host address [all hosts]')
     args = parser.parse_args()
-    if args.start and args.create_fx_product is None:
-        parser.error('--start requires --create-fx-product')
+    if args.start and args.create_fx_product is None and args.create_beamformer_product is None:
+        parser.error('--start requires --create-fx-product or --create-beamformer-product')
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s:%(name)s: %(message)s')
 
     context = accel.create_some_context(interactive=False)

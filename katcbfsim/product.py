@@ -2,10 +2,11 @@ from __future__ import print_function, division
 import trollius
 import logging
 import collections
-from trollius import From
+from trollius import From, Return
 from katsdptelstate import endpoint
 from katsdpsigproc import accel
 import katpoint
+import numpy as np
 from . import rime
 
 
@@ -23,6 +24,11 @@ class IncompleteConfigError(RuntimeError):
     """Exception thrown when requesting capture but the product or subarray
     is missing necessary configuration.
     """
+    pass
+
+
+class UnsupportedProductError(RuntimeError):
+    """Exception thrown for operations not supported on this product type."""
     pass
 
 
@@ -202,12 +208,184 @@ class Subarray(object):
         return self.target
 
 
-class FXProduct(object):
-    """Simulation of a correlation product.
+class Product(object):
+    """Base class for simulated products. It provides the basic machinery to
+    start and stop capture running in a separate asyncio task.
 
     Unless otherwise documented, changing any attributes while a capture is in
     progress has undefined behaviour. In some cases, but not all, this is
     enforced by a :exc:`CaptureInProgressError`.
+
+    Parameters
+    ----------
+    subarray : :class:`Subarray`
+        Subarray corresponding to this product
+    name : str
+        Name for this product (used by katcp)
+    loop : :class:`trollius.BaseEventLoop`, optional
+        Event loop for coroutines
+
+    Attributes
+    ----------
+    name : :class:`str`
+        Name for this product (used by katcp)
+    subarray : :class:`Subarray`
+        Subarray corresponding to this product
+    n_antennas : int, read-only
+        Number of antennas
+    n_baselines : int, read-only
+        Number of baselines (antenna pairs, not input pairs)
+    destination_factory : callable
+        Called with `self` to return a stream on which output will be sent.
+    time_scale : float
+        Scale factor between virtual time in the simulation and wall clock
+        time. Smaller values will run the simulation faster; setting it to 0
+        will cause the simulation to run as fast as possible.
+    capturing : bool, read-only
+        Whether a capture is in progress. This is true from
+        :meth:`capture_start` until :meth:`capture_stop` completes, even if
+        the capture coroutine terminates earlier.
+    """
+    def __init__(self, subarray, name, loop=None):
+        self._capture_future = None
+        self._stop_future = None
+        self.name = name
+        self.subarray = subarray
+        self.time_scale = 1.0
+        self.destination_factory = None
+        if loop is None:
+            self._loop = trollius.get_event_loop()
+        else:
+            self._loop = loop
+
+    def __setattr__(self, key, value):
+        # Prevent modifications while capture is in progress
+        if not key.startswith('_') and self.capturing:
+            raise CaptureInProgressError('cannot set {} while capture is in progress'.format(key))
+        return super(Product, self).__setattr__(key, value)
+
+    @property
+    def n_antennas(self):
+        return len(self.subarray.antennas)
+
+    @property
+    def n_baselines(self):
+        n = self.n_antennas
+        return n * (n + 1) // 2
+
+    @property
+    def capturing(self):
+        return self._capture_future is not None
+
+    def capture_start(self):
+        """Begin capturing data, if it has not been done already. The
+        capturing is done on the trollius event loop, which must thus be
+        allowed to run frequency to ensure timeous delivery of results.
+
+        Subclasses may override this to provide consistency checks on the
+        state. They must also provide the :meth:`_capture` coroutine.
+
+        Raises
+        ------
+        IncompleteConfigError
+            if no destination is defined
+        """
+        if self.capturing:
+            logger.warn('Ignoring attempt to start capture when already running')
+            return
+        if self.destination_factory is None:
+            raise IncompleteConfigError('no destination specified')
+        self.subarray.capturing += 1
+        # Create a future that is set by capture_stop
+        self._stop_future = trollius.Future(loop=self._loop)
+        # Start the capture coroutine on the event loop
+        self._capture_future = trollius.async(self._capture(), loop=self._loop)
+
+    @trollius.coroutine
+    def capture_stop(self):
+        """Request an end to data capture, and wait for capture to complete.
+        This is a coroutine.
+        """
+        if not self.capturing:
+            logger.warn('Ignoring attempt to stop capture when not running')
+            return
+        self._stop_future.set_result(None)
+        yield From(self._capture_future)
+        self._stop_future = None
+        self._capture_future = None
+        self.subarray.capturing -= 1
+
+    @trollius.coroutine
+    def wait_for_next(self, wall_time):
+        """Utility function for subclasses to managing timing. It will wait
+        until either `wall_time` is reached, or :meth:`capture_stop` has been
+        called. It also warns if `wall_time` has already passed.
+
+        Parameters
+        ----------
+        wall_time : float
+            Loop timestamp at which to stop
+
+        Returns
+        -------
+        stopped : bool
+            If true, then :meth:`capture_stop` was called.
+        """
+        try:
+            now = self._loop.time()
+            if now > wall_time:
+                logger.warn('Falling behind the requested rate by %f seconds', now - wall_time)
+            else:
+                logger.debug('Sleeping for %f seconds', wall_time - now)
+            yield From(wait_until(trollius.shield(self._stop_future), wall_time, self._loop))
+        except trollius.TimeoutError:
+            # This is the normal case: time for the next dump to be transmitted
+            stopped = False
+        else:
+            # The _stop_future was triggered
+            stopped = True
+        raise Return(stopped)
+
+
+class CBFProduct(Product):
+    """Parts that are shared between :class:`FXProduct` and :class:`BeamformerProduct`.
+
+    Parameters
+    ----------
+    subarray : :class:`Subarray`
+        Subarray corresponding to this product
+    name : str
+        Name for this product (used by katcp)
+    adc_rate : int
+        Simulated ADC clock rate, in Hz
+    bandwidth : int
+        Total bandwidth over all channels, in Hz
+    n_channels : int
+        Number of channels
+    loop : :class:`trollius.BaseEventLoop`, optional
+        Event loop for coroutines
+
+    Attributes
+    ----------
+    adc_rate : int
+        Simulated ADC clock rate, in Hz
+    bandwidth : int
+        Total bandwidth over all channels, in Hz
+    n_channels : int
+        Number of channels
+    center_frequency : int
+        Frequency of the center of the band, in Hz
+    """
+    def __init__(self, subarray, name, adc_rate, bandwidth, n_channels, loop=None):
+        super(CBFProduct, self).__init__(subarray, name, loop)
+        self.adc_rate = adc_rate
+        self.bandwidth = bandwidth
+        self.n_channels = n_channels
+        self.center_frequency = 1284000000
+
+
+class FXProduct(CBFProduct):
+    """Simulation of a correlation product.
 
     Parameters
     ----------
@@ -230,67 +408,22 @@ class FXProduct(object):
     ----------
     context : katsdpsigproc context
         Device context
-    subarray : :class:`Subarray`
-        Subarray corresponding to this product
-    name : :class:`str`
-        Name for this product (used by katcp)
-    adc_rate : int
-        Simulated ADC clock rate, in Hz
-    bandwidth : int
-        Total bandwidth over all channels, in Hz
-    n_channels : int
-        Number of channels
-    n_antennas : int, read-only
-        Number of antennas
-    n_baselines : int, read-only
-        Number of baselines (antenna pairs, not input pairs)
-    center_frequency : int
-        Frequency of the center of the band, in Hz
-    destination_factory : callable
-        Called with `self` to return a stream on which output will be sent.
     accumulation_length : float
         Simulated integration time in seconds. This is a property: setting the
         value will round it to the nearest supported value.
     wall_accumulation_length : float, read-only
         Minimum wall-clock time between emitting dumps. This is determined by
         :attr:`accumulation_length` and :attr:`time_scale`.
-    time_scale : float
-        Scale factor between virtual time in the simulation and wall clock
-        time. Smaller values will run the simulation faster; setting it to 0
-        will cause the simulation to run as fast as possible.
     n_accs : int, read-only
         Number of simulated accumulations per output dump. This is set
         indirectly by writing to :attr:`accumulation_length`.
-    capturing : bool, read-only
-        Whether a capture is in progress. This is true from
-        :meth:`capture_start` until :meth:`capture_stop` completes, even if
-        the capture coroutine terminates earlier.
     """
     def __init__(self, context, subarray, name, adc_rate, bandwidth, n_channels, loop=None):
-        self._capture_future = None
-        self._stop_future = None
+        super(FXProduct, self).__init__(subarray, name, adc_rate, bandwidth, n_channels, loop)
         self.context = context
-        self.name = name
-        self.subarray = subarray
-        self.destination_factory = None
-        self.adc_rate = adc_rate
-        self.bandwidth = bandwidth
-        self.n_channels = n_channels
-        self.center_frequency = 1284000000
         self.accumulation_length = 0.5
-        self.time_scale = 1.0
         self.sefd = 20.0
         self.seed = 1
-        if loop is None:
-            self._loop = trollius.get_event_loop()
-        else:
-            self._loop = loop
-
-    def __setattr__(self, key, value):
-        # Prevent modifications while capture is in progress
-        if not key.startswith('_') and self.capturing:
-            raise CaptureInProgressError('cannot set {} while capture is in progress'.format(key))
-        return super(FXProduct, self).__setattr__(key, value)
 
     @property
     def wall_accumulation_length(self):
@@ -315,34 +448,16 @@ class FXProduct(object):
     def n_accs(self):
         return self._n_accs
 
-    @property
-    def n_antennas(self):
-        return len(self.subarray.antennas)
-
-    @property
-    def n_baselines(self):
-        n = self.n_antennas
-        return n * (n + 1) // 2
-
-    @property
-    def capturing(self):
-        return self._capture_future is not None
-
     def capture_start(self):
-        """Begin capturing data, if it has not been done already. The
-        capturing is done on the trollius event loop, which must thus be
-        allowed to run frequency to ensure timeous delivery of results.
+        """Begin capturing data, if it has not been done already.
 
         Raises
         ------
         IncompleteConfigError
-            if the subarray has no sources
+            if the subarray has no sources, no antennas, or no target
         IncompleteConfigError
-            if the subarray has no antennas
+            if no destination is defined
         """
-        if self.capturing:
-            logger.warn('Ignoring attempt to start capture when already running')
-            return
         if not self.subarray.antennas:
             raise IncompleteConfigError('no antennas defined')
         if not self.subarray.sources:
@@ -351,25 +466,7 @@ class FXProduct(object):
             raise IncompleteConfigError('no destination specified')
         if self.subarray.target_at(self.subarray.sync_time) is None:
             raise IncompleteConfigError('no target set')
-        self.subarray.capturing += 1
-        # Create a future that is set by capture_stop
-        self._stop_future = trollius.Future(loop=self._loop)
-        # Start the capture coroutine on the event loop
-        self._capture_future = trollius.async(self._capture(), loop=self._loop)
-
-    @trollius.coroutine
-    def capture_stop(self):
-        """Request an end to data capture, and wait for capture to complete.
-        This is a coroutine.
-        """
-        if not self.capturing:
-            logger.warn('Ignoring attempt to stop capture when not running')
-            return
-        self._stop_future.set_result(None)
-        yield From(self._capture_future)
-        self._stop_future = None
-        self._capture_future = None
-        self.subarray.capturing -= 1
+        super(FXProduct, self).capture_start()
 
     def _make_predict(self):
         """Compiles the kernel, allocates memory etc. This is potentially slow,
@@ -501,18 +598,8 @@ class FXProduct(object):
                 # Sleep until either it is time to make the next dump, or we are asked
                 # to stop.
                 wall_time += self.wall_accumulation_length
-                try:
-                    now = self._loop.time()
-                    if now > wall_time:
-                        logger.warn('Falling behind the requested rate by %f seconds', now - wall_time)
-                    else:
-                        logger.debug('Sleeping for %f seconds', wall_time - now)
-                    yield From(wait_until(trollius.shield(self._stop_future), wall_time, self._loop))
-                except trollius.TimeoutError:
-                    # This is the normal case: time for the next dump to be transmitted
-                    pass
-                else:
-                    # The _stop_future was triggered
+                stopped = yield From(self.wait_for_next(wall_time))
+                if stopped:
                     break
                 # Reap any previously completed coroutines
                 while dump_futures and dump_futures[0].done():
@@ -530,5 +617,107 @@ class FXProduct(object):
             for future in dump_futures:
                 if not future.done():
                     future.cancel()
+            if destination is not None:
+                yield From(destination.close())
+
+
+class BeamformerProduct(CBFProduct):
+    """Simulated beam-former. The individual antennas are not simulated, but
+    are still used to provide input labelling.
+
+    Parameters
+    ----------
+    subarray : :class:`Subarray`
+        Subarray corresponding to this product
+    name : str
+        Name for this product (used by katcp)
+    adc_rate : int
+        Simulated ADC clock rate, in Hz
+    bandwidth : int
+        Total bandwidth over all channels, in Hz
+    n_channels : int
+        Number of channels
+    timesteps : int
+        Number of samples in time accumulated into a single update. This is
+        used by :class:`BeamformerStreamSpead` to decide the data shape.
+    sample_bits : int
+        Number of bits per output sample (for each of real and imag). Currently
+        this must be 8, 16 or 32.
+    loop : :class:`trollius.BaseEventLoop`, optional
+        Event loop for coroutines
+
+    Attributes
+    ----------
+    timesteps : int
+        Number of samples in time accumulated into a single update. This is
+        used by :class:`BeamformerStreamSpead` to decide the data shape.
+    sample_bits : int
+        Number of bits per output sample (for each of real and imag). Currently
+        this must be 8, 16 or 32.
+    dtype : numpy data type
+        Data type corresponding to :attr:`sample_bits`
+    interval : float
+        Seconds between output dumps, in simulation time
+    wall_interval : float
+        Equivalent to :attr:`interval`, but in wall-clock time
+    """
+    def __init__(self, subarray, name, adc_rate, bandwidth, n_channels, timesteps, sample_bits, loop=None):
+        super(BeamformerProduct, self).__init__(subarray, name, adc_rate, bandwidth, n_channels, loop)
+        self.timesteps = timesteps
+        self.sample_bits = sample_bits
+        if sample_bits == 8:
+            self.dtype = np.int8
+        elif sample_bits == 16:
+            self.dtype = np.int16
+        elif sample_bits == 32:
+            self.dtype = np.int32
+        else:
+            raise ValueError('sample_bits must be 8, 16 or 32')
+
+    @property
+    def interval(self):
+        return self.timesteps * self.n_channels / self.bandwidth
+
+    @property
+    def wall_interval(self):
+        return self.time_scale * self.interval
+
+    @trollius.coroutine
+    def _run_dump(self, destination, index):
+        data = np.zeros((self.n_channels, self.timesteps, 2), self.dtype)
+        yield From(destination.send(data, index))
+
+    def _capture(self):
+        destination = None
+        dump_futures = collections.deque()
+        try:
+            destination = self.destination_factory(self)
+            yield From(destination.send_metadata())
+            index = 0
+            wall_time = self._loop.time()
+            while True:
+                while len(dump_futures) > 3:
+                    yield From(dump_futures[0])
+                    dump_futures.popleft()
+                future = trollius.async(
+                    self._run_dump(destination, index), loop=self._loop)
+                dump_futures.append(future)
+                wall_time += self.wall_interval
+                stopped = yield From(self.wait_for_next(wall_time))
+                if stopped:
+                    break
+                # Reap any previously completed coroutines
+                while dump_futures and dump_futures[0].done():
+                    dump_futures[0].result()  # Re-throws exceptions here
+                    dump_futures.popleft()
+                index += 1
+            logging.info('Stop requested, waiting for in-flight dumps...')
+            while dump_futures:
+                yield From(dump_futures[0])
+                dump_futures.popleft()
+            logging.info('Capture stopped by request')
+            yield From(destination.close())
+        except Exception:
+            logger.error('Exception in capture coroutine', exc_info=True)
             if destination is not None:
                 yield From(destination.close())
