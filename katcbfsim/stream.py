@@ -57,8 +57,8 @@ class CBFSpeadStream(SpeadStream):
         self.xeng_acc_len = 256
         self.requant_bits = 8
         self.adc_bits = 10
-        # TODO: what should we use?
-        self.scale_factor_timestamp = self.product.bandwidth / self.product.n_channels
+        # CBF apparently use this, even though it wraps pretty quickly
+        self.scale_factor_timestamp = self.product.adc_rate
 
     def add_adc_sample_rate_item(self, ig):
         ig.add_item(0x1007, 'adc_sample_rate', 'Expected ADC sample rate (sampled/second)',
@@ -229,7 +229,7 @@ class FXStreamSpead(CBFSpeadStream):
         assert vis.flags.c_contiguous, 'Visibility array must be contiguous'
         vis_view = vis.reshape(self._ig_data['xeng_raw'].shape)
         self._ig_data['xeng_raw'].value = vis_view
-        timestamp = dump_index * self.product.n_accs
+        timestamp = dump_index * self.product.n_accs * self.product.n_channels * self.scale_factor_timestamp // self.product.bandwidth
         # Truncate timestamp to the width of the field it is in
         timestamp = timestamp & ((1 << self._flavour.heap_address_bits) - 1)
         self._ig_data['timestamp'].value = timestamp
@@ -360,7 +360,7 @@ class BeamformerStreamSpead(CBFSpeadStream):
     @trollius.coroutine
     def send(self, beam_data, index):
         self._ig_data['bf_raw'].value = beam_data
-        timestamp = index * self.product.timesteps
+        timestamp = index * self.product.timesteps * self.product.n_channels * self.scale_factor_timestamp // self.product.bandwidth
         # Truncate timestamp to the width of the field it is in
         timestamp = timestamp & ((1 << self._flavour.heap_address_bits) - 1)
         self._ig_data['timestamp'].value = timestamp
