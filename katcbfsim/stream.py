@@ -336,11 +336,10 @@ class BeamformerStreamSpead(CBFSpeadStream):
     def _make_ig_data(self):
         ig = spead2.send.ItemGroup(flavour=self._flavour)
         self.add_timestamp_item(ig)
-        # TODO: frequency. It's not clear what this means given that the data
-        # covers multiple frequencies
-        # TODO: need to assign beam number and beam name
-        # TODO: ICD says 0xb000 + N, but that doesn't fit
-        ig.add_item(0x3000 + 0, 'bf_Beam', 'Beamformer output for frequency-domain beam. User-defined name (out of band control). Record length depending on number of frequency channels and F-X packet size (xeng_acc_len).',
+        # frequency is omitted because we have no way to set a per-packet value. It's
+        # useless anyway.
+        # bf_raw is not in v3 of the ICD, but this is according to MKAT-ECP-157
+        ig.add_item(0x5000, 'bf_raw', 'Beamformer output for frequency-domain beam. User-defined name (out of band control). Record length depending on number of frequency channels and F-X packet size (xeng_acc_len).',
             shape=(self.product.n_channels, self.product.timesteps, 2), dtype=self.product.dtype)
         return ig
 
@@ -360,9 +359,7 @@ class BeamformerStreamSpead(CBFSpeadStream):
 
     @trollius.coroutine
     def send(self, beam_data, index):
-        # TODO: which beam number?
-        # TODO: ICD says 0xb000 + N, but that doesn't fit
-        self._ig_data[0x3000 + 0].value = beam_data
+        self._ig_data['bf_raw'].value = beam_data
         timestamp = index * self.product.timesteps
         # Truncate timestamp to the width of the field it is in
         timestamp = timestamp & ((1 << self._flavour.heap_address_bits) - 1)
