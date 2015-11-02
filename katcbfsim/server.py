@@ -50,9 +50,11 @@ class SimulatorServer(katcp.DeviceServer):
     BUILD_INFO = ('katcbfsim', 0, 1, '')
 
     def __init__(self, context, subarray=None, *args, **kwargs):
+        clock_ratio = kwargs.pop('clock_ratio', 1.0)
         super(SimulatorServer, self).__init__(*args, **kwargs)
         self._context = context
         self._products = {}
+        self._clock_ratio = clock_ratio
         if subarray is None:
             self._subarray = Subarray()
         else:
@@ -80,6 +82,7 @@ class SimulatorServer(katcp.DeviceServer):
         }
         for sensor in self._product_sensors[product].itervalues():
             self.add_sensor(sensor)
+        product.clock_ratio = self._clock_ratio
 
     def add_fx_product(self, name, *args, **kwargs):
         product = FXProduct(self._context, self._subarray, name, *args, **kwargs)

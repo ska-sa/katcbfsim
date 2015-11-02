@@ -237,7 +237,7 @@ class Product(object):
         Number of baselines (antenna pairs, not input pairs)
     destination_factory : callable
         Called with `self` to return a stream on which output will be sent.
-    time_scale : float
+    clock_ratio : float
         Scale factor between virtual time in the simulation and wall clock
         time. Smaller values will run the simulation faster; setting it to 0
         will cause the simulation to run as fast as possible.
@@ -251,7 +251,7 @@ class Product(object):
         self._stop_future = None
         self.name = name
         self.subarray = subarray
-        self.time_scale = 1.0
+        self.clock_ratio = 1.0
         self.destination_factory = None
         if loop is None:
             self._loop = trollius.get_event_loop()
@@ -413,7 +413,7 @@ class FXProduct(CBFProduct):
         value will round it to the nearest supported value.
     wall_accumulation_length : float, read-only
         Minimum wall-clock time between emitting dumps. This is determined by
-        :attr:`accumulation_length` and :attr:`time_scale`.
+        :attr:`accumulation_length` and :attr:`clock_ratio`.
     n_accs : int, read-only
         Number of simulated accumulations per output dump. This is set
         indirectly by writing to :attr:`accumulation_length`.
@@ -427,7 +427,7 @@ class FXProduct(CBFProduct):
 
     @property
     def wall_accumulation_length(self):
-        return self.time_scale * self.accumulation_length
+        return self.clock_ratio * self.accumulation_length
 
     @property
     def accumulation_length(self):
@@ -680,7 +680,7 @@ class BeamformerProduct(CBFProduct):
 
     @property
     def wall_interval(self):
-        return self.time_scale * self.interval
+        return self.clock_ratio * self.interval
 
     @trollius.coroutine
     def _run_dump(self, destination, index):

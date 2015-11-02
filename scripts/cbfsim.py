@@ -102,6 +102,7 @@ def main():
     parser.add_argument('--cbf-antenna-file', metavar='FILE', help='Load antenna descriptions from file, one per line')
     parser.add_argument('--cbf-sim-source', dest='cbf_sim_sources', type=parse_source, action='append', default=[], metavar='DESCRIPTION', help='Specify a source object (can be used multiple times)')
     parser.add_argument('--cbf-sim-source-file', metavar='FILE', help='Load source descriptions from file, one per line')
+    parser.add_argument('--cbf-sim-clock-ratio', type=float, default=1.0, metavar='RATIO', help='Ratio of real time to simulated time (<1 to run faster than real time, >1 for slower)')
     parser.add_argument('--cbf-target', metavar='DESCRIPTION', help='Set initial target')
     parser.add_argument('--beamformer-timesteps', metavar='TIMES', type=int, default=256, help='Spectra included in each beamformer heap [%(default)s]')
     parser.add_argument('--beamformer-bits', metavar='BITS', type=int, choices=[8, 16, 32], default=8, help='Bits per real value in beamformer data [%(default)s]')
@@ -119,7 +120,8 @@ def main():
         subarray = TelstateSubarray(args.telstate)
     else:
         subarray = Subarray()
-    server = katcbfsim.server.SimulatorServer(context, subarray, args.host, args.port)
+    server = katcbfsim.server.SimulatorServer(context, subarray, args.host, args.port,
+        clock_ratio=args.cbf_sim_clock_ratio)
     prepare_server(server, args)
     server.set_concurrency_options(thread_safe=False, handler_thread=False)
     server.set_ioloop(ioloop)
