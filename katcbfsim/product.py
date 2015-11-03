@@ -169,10 +169,10 @@ class Subarray(object):
         Raises
         ------
         CaptureInProgressError
-            If any associated product has a capture in progress
+            If any associated product has a capture is in progress
         """
         if self.capturing:
-            raise CaptureInProgressError('cannot add antennas while capture in progress')
+            raise CaptureInProgressError('cannot add antennas while capture is in progress')
         self.antennas.append(antenna)
 
     def add_source(self, source):
@@ -188,10 +188,10 @@ class Subarray(object):
         Raises
         ------
         CaptureInProgressError
-            If any associated product has a capture in progress
+            If any associated product has a capture is in progress
         """
         if self.capturing:
-            raise CaptureInProgressError('cannot add antennas while capture in progress')
+            raise CaptureInProgressError('cannot add source while capture is in progress')
         if source.flux_model is None:
             logging.warn('source has no flux model; it will be assumed to be 1 Jy')
         self.sources.append(source)
@@ -203,7 +203,7 @@ class Subarray(object):
     @sync_time.setter
     def sync_time(self, value):
         if self.capturing:
-            raise CaptureInProgressError('cannot change sync time while capture in progress')
+            raise CaptureInProgressError('cannot set sync time while capture is in progress')
         self._sync_time = katpoint.Timestamp(int(value.secs))
 
     @property
@@ -213,7 +213,7 @@ class Subarray(object):
     @clock_ratio.setter
     def clock_ratio(self, value):
         if self.capturing:
-            raise CaptureInProgressError('cannot change clock ratio while capture in progress')
+            raise CaptureInProgressError('cannot set clock ratio while capture is in progress')
         self._clock_ratio = value
 
     def target_at(self, timestamp):
