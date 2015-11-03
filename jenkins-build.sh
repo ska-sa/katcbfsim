@@ -6,4 +6,4 @@ pip install coverage
 pip install -r requirements.txt
 pip install .[test]
 export CUDA_DEVICE=0
-nosetests --no-path-adjustment --with-xunit --with-coverage --cover-erase --cover-xml --cover-package=katcbfsim
+nosetests --no-path-adjustment --with-xunit --with-coverage --cover-erase --cover-xml --cover-inclusive --cover-package=katcbfsim
