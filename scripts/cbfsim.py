@@ -120,8 +120,8 @@ def main():
         subarray = TelstateSubarray(args.telstate)
     else:
         subarray = Subarray()
-    server = katcbfsim.server.SimulatorServer(context, subarray, args.host, args.port,
-        clock_ratio=args.cbf_sim_clock_ratio)
+    subarray.clock_ratio = args.cbf_sim_clock_ratio
+    server = katcbfsim.server.SimulatorServer(context, subarray, args.host, args.port)
     prepare_server(server, args)
     server.set_concurrency_options(thread_safe=False, handler_thread=False)
     server.set_ioloop(ioloop)

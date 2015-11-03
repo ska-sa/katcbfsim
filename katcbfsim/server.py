@@ -50,11 +50,9 @@ class SimulatorServer(katcp.DeviceServer):
     BUILD_INFO = ('katcbfsim', 0, 1, '')
 
     def __init__(self, context, subarray=None, *args, **kwargs):
-        clock_ratio = kwargs.pop('clock_ratio', 1.0)
         super(SimulatorServer, self).__init__(*args, **kwargs)
         self._context = context
         self._products = {}
-        self._clock_ratio = clock_ratio
         if subarray is None:
             self._subarray = Subarray()
         else:
@@ -82,7 +80,6 @@ class SimulatorServer(katcp.DeviceServer):
         }
         for sensor in self._product_sensors[product].itervalues():
             self.add_sensor(sensor)
-        product.clock_ratio = self._clock_ratio
 
     def add_fx_product(self, name, *args, **kwargs):
         product = FXProduct(self._context, self._subarray, name, *args, **kwargs)
@@ -173,6 +170,21 @@ class SimulatorServer(katcp.DeviceServer):
         """Set the sync time, as seconds since the UNIX epoch. This will also
         be the timestamp associated with the first data dump."""
         self.set_sync_time(timestamp)
+        return 'ok',
+
+    def set_clock_ratio(self, clock_ratio):
+        self._subarray.clock_ratio = clock_ratio
+
+    @request(Float())
+    @return_reply()
+    @_product_exceptions
+    def request_clock_ratio(self, sock, clock_ratio):
+        """Set the ratio between wall clock time and simulated time. Values
+        less than 1 will cause simulated time to run faster than wall clock
+        time. Setting it to 0 will cause simulation to be done as fast as
+        possible.
+        """
+        self.set_clock_ratio(clock_ratio)
         return 'ok',
 
     def set_target(self, target):

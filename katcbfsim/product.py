@@ -145,12 +145,17 @@ class Subarray(object):
     sync_time : :class:`katpoint.Timestamp`
         Start time for the simulated capture. When set, it is truncated to a
         whole number of seconds.
+    clock_ratio : float
+        Scale factor between virtual time in the simulation and wall clock
+        time. Smaller values will run the simulation faster; setting it to 0
+        will cause the simulation to run as fast as possible.
     """
     def __init__(self):
         self.antennas = []
         self.sources = []
         self.target = None
         self._sync_time = katpoint.Timestamp()
+        self._clock_ratio = 1.0
         self.capturing = 0     # Number of products that are capturing
 
     def add_antenna(self, antenna):
@@ -201,6 +206,16 @@ class Subarray(object):
             raise CaptureInProgressError('cannot change sync time while capture in progress')
         self._sync_time = katpoint.Timestamp(int(value.secs))
 
+    @property
+    def clock_ratio(self):
+        return self._clock_ratio
+
+    @clock_ratio.setter
+    def clock_ratio(self, value):
+        if self.capturing:
+            raise CaptureInProgressError('cannot change clock ratio while capture in progress')
+        self._clock_ratio = value
+
     def target_at(self, timestamp):
         """Obtains the target at a given point in simulated time. In this base
         class this just returns :attr:`target`, but it can be overridden by
@@ -237,10 +252,6 @@ class Product(object):
         Number of baselines (antenna pairs, not input pairs)
     destination_factory : callable
         Called with `self` to return a stream on which output will be sent.
-    clock_ratio : float
-        Scale factor between virtual time in the simulation and wall clock
-        time. Smaller values will run the simulation faster; setting it to 0
-        will cause the simulation to run as fast as possible.
     capturing : bool, read-only
         Whether a capture is in progress. This is true from
         :meth:`capture_start` until :meth:`capture_stop` completes, even if
@@ -251,7 +262,6 @@ class Product(object):
         self._stop_future = None
         self.name = name
         self.subarray = subarray
-        self.clock_ratio = 1.0
         self.destination_factory = None
         if loop is None:
             self._loop = trollius.get_event_loop()
@@ -413,7 +423,7 @@ class FXProduct(CBFProduct):
         value will round it to the nearest supported value.
     wall_accumulation_length : float, read-only
         Minimum wall-clock time between emitting dumps. This is determined by
-        :attr:`accumulation_length` and :attr:`clock_ratio`.
+        :attr:`accumulation_length` and :attr:`Subarray.clock_ratio`.
     n_accs : int, read-only
         Number of simulated accumulations per output dump. This is set
         indirectly by writing to :attr:`accumulation_length`.
@@ -427,7 +437,7 @@ class FXProduct(CBFProduct):
 
     @property
     def wall_accumulation_length(self):
-        return self.clock_ratio * self.accumulation_length
+        return self.subarray.clock_ratio * self.accumulation_length
 
     @property
     def accumulation_length(self):
@@ -680,7 +690,7 @@ class BeamformerProduct(CBFProduct):
 
     @property
     def wall_interval(self):
-        return self.clock_ratio * self.interval
+        return self.subarray.clock_ratio * self.interval
 
     @trollius.coroutine
     def _run_dump(self, destination, index):
