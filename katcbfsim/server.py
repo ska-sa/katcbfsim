@@ -9,9 +9,8 @@ import functools
 from katcp import Sensor
 from katcp.kattypes import Str, Float, Int, Address, request, return_reply
 from katsdptelstate import endpoint
-from . import product
+from . import product, stream
 from .product import Subarray, FXProduct, BeamformerProduct
-from .stream import FXStreamSpead, FXStreamFile, BeamformerStreamSpead
 
 
 logger = logging.getLogger(__name__)
@@ -112,9 +111,9 @@ class SimulatorServer(katcp.DeviceServer):
 
     def set_destination(self, product, endpoints):
         if isinstance(product, FXProduct):
-            product.destination_factory = FXStreamSpead.factory(endpoints)
+            product.destination_factory = stream.FXStreamSpead.factory(endpoints)
         elif isinstance(product, BeamformerProduct):
-            product.destination_factory = BeamformerStreamSpead.factory(endpoints)
+            product.destination_factory = stream.BeamformerStreamSpead.factory(endpoints)
         else:
             raise product.UnsupportedProductError('unknown product type')
 
@@ -138,7 +137,7 @@ class SimulatorServer(katcp.DeviceServer):
     def request_capture_destination_file(self, sock, product, destination):
         """Set the destination to an HDF5 file"""
         if isinstance(product, FXProduct):
-            product.destination_factory = FXStreamFile.factory(destination)
+            product.destination_factory = stream.FXStreamFile.factory(destination)
         else:
             return 'fail', 'file capture not supported for this product type'
         return 'ok',
