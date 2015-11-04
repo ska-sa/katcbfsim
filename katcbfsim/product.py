@@ -685,6 +685,11 @@ class BeamformerProduct(CBFProduct):
     @trollius.coroutine
     def _run_dump(self, destination, index):
         data = np.zeros((self.n_channels, self.timesteps, 2), self.dtype)
+        # Stuff in some patterned values to help test decoding
+        for i in range(self.timesteps):
+            value = index * self.timesteps + i
+            data[value % self.n_channels, value % self.timesteps, 0] = value & 0x7f
+            data[value % self.n_channels, value % self.timesteps, 1] = (value >> 15) & 0x7f
         yield From(destination.send(data, index))
 
     def _capture(self):
