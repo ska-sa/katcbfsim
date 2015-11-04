@@ -250,11 +250,13 @@ class SimulatorServer(katcp.DeviceServer):
         for name in antenna_names:
             attribute_name = name + '_observer'
             try:
-                description = telstate[attribute_name]
+                antenna = telstate[attribute_name]
             except KeyError:
                 logger.warn('Antenna description for %s not found, skipping', name)
             else:
-                self.add_antenna(katpoint.Antenna(description))
+                # It might be either a string or an object at this point.
+                # The constructor handles either case.
+                self.add_antenna(katpoint.Antenna(antenna))
 
     @request()
     @return_reply()

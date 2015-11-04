@@ -178,5 +178,5 @@ in the :attr:`config` dictionary:
 - The list of antennas is obtained from
   ``telstate['config']['antenna_mask']``, which must be a comma-separated list
   (without whitespace). For an antenna named `name`, the attribute
-  :samp:`{name}_observer` is used to obtain the description string for the
-  antenna.
+  :samp:`{name}_observer` is used to obtain the antenna. It can be specified as
+  either a description string or an antenna object.
