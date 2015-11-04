@@ -271,6 +271,31 @@ class SimulatorServer(katcp.DeviceServer):
         self.configure_subarray_from_telstate()
         return 'ok',
 
+    def configure_product_from_telstate(self, product, telstate=None):
+        if telstate is None:
+            telstate = self._telstate
+        if isinstance(product, FXProduct):
+            # Set accumulation length
+            try:
+                accumulation_length = 1.0 / telstate['sub_dump_rate']
+            except KeyError:
+                logger.warn('sub_dump_rate not found for %s, accumulation-length not set', product.name)
+            else:
+                self.set_accumulation_length(product, accumulation_length)
+
+    @request(Str())
+    @return_reply()
+    @_product_request
+    @_product_exceptions
+    def request_configure_product_from_telstate(self, sock, product):
+        """Configure product from sensors/attributes in telescope state.
+        Currently only accumulation length is set; in particular it will
+        **not** set a center frequency."""
+        if self._telstate is None:
+            return 'fail', 'no telescope state was specified with --telstate'
+        self.configure_product_from_telstate(product)
+        return 'ok',
+
     def capture_start(self, product):
         product.capture_start()
 
