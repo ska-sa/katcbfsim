@@ -107,7 +107,7 @@ def main():
         subarray = TelstateSubarray(args.telstate)
     else:
         subarray = Subarray()
-    server = katcbfsim.server.SimulatorServer(context, subarray, args.host, args.port)
+    server = katcbfsim.server.SimulatorServer(context, subarray, telstate=args.telstate, host=args.host, port=args.port)
     prepare_server(server, args)
     server.set_concurrency_options(thread_safe=False, handler_thread=False)
     server.set_ioloop(ioloop)

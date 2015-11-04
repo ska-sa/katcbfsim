@@ -45,11 +45,25 @@ def _product_exceptions(wrapped):
 
 
 class SimulatorServer(katcp.DeviceServer):
+    """katcp server for the simulator.
+
+    Parameters
+    ----------
+    context : compute device context
+        Compute device context used for device-accelerated simulations
+    subarray : :class:`katcbfsim.product.Subarray`, optional
+        Preconfigured subarray. If not specified, an unconfigured subarray is created.
+    telstate : :class:`katsdptelstate.TelescopeState`, optional
+        Telescope state used for the :samp:`?configure-subarray-from-telstate`.
+        If not provided, that require will fail.
+    *args, **kwargs :
+        Passed to base class
+    """
 
     VERSION_INFO = ('katcbfsim-api', 1, 0)
     BUILD_INFO = ('katcbfsim', 0, 1, '')
 
-    def __init__(self, context, subarray=None, *args, **kwargs):
+    def __init__(self, context, subarray=None, telstate=None, *args, **kwargs):
         super(SimulatorServer, self).__init__(*args, **kwargs)
         self._context = context
         self._products = {}
@@ -57,6 +71,7 @@ class SimulatorServer(katcp.DeviceServer):
             self._subarray = Subarray()
         else:
             self._subarray = subarray
+        self._telstate = telstate
         # Dictionary of dictionaries, indexed by product then sensor name
         self._product_sensors = {}
 
@@ -225,6 +240,33 @@ class SimulatorServer(katcp.DeviceServer):
         """List the sources in the sky model."""
         for source in self._subarray.sources:
             sock.inform(source.description)
+        return 'ok',
+
+    def configure_subarray_from_telstate(self, telstate=None):
+        """Configure subarray from sensors/attributes in telescope state."""
+        if telstate is None:
+            telstate = self._telstate
+        antenna_names = telstate['config']['antenna_mask'].split(',')
+        for name in antenna_names:
+            attribute_name = name + '_observer'
+            try:
+                description = telstate[attribute_name]
+            except KeyError:
+                logger.warn('Antenna description for %s not found, skipping', name)
+            else:
+                self.add_antenna(katpoint.Antenna(description))
+
+    @request()
+    @return_reply()
+    @_product_exceptions
+    def request_configure_subarray_from_telstate(self, sock):
+        """Configure the subarray using sensors and attributes in the telescope
+        state. This uses dynamic values, rather than the :samp:`config`
+        dictionary used by the command-line parser.
+        """
+        if self._telstate is None:
+            return 'fail', 'no telescope state was specified with --telstate'
+        self.configure_subarray_from_telstate()
         return 'ok',
 
     def capture_start(self, product):
