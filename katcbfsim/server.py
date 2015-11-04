@@ -22,13 +22,13 @@ def _product_request(wrapped):
     it to the wrapped function, or returns a failure message if it does not
     exist.
     """
+    @functools.wraps(wrapped)
     def wrapper(self, sock, name, *args, **kwargs):
         try:
             product = self._products[name]
         except KeyError:
-            return 'fail', 'requested product name not found'
+            return 'fail', 'requested product name "{}" not found'.format(name)
         return wrapped(self, sock, product, *args, **kwargs)
-    functools.update_wrapper(wrapper, wrapped)
     return wrapper
 
 def _product_exceptions(wrapped):
