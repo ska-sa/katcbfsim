@@ -47,7 +47,7 @@ as a setuptools requirement).
 
 Using katcbfsim
 ---------------
-There are several ways to run a simulation:
+There are several ways to run a simulation, which can also be mixed.
 
 1. Command-line only. In this mode, the target (phase centre) is fixed for the
    simulation.
@@ -60,12 +60,14 @@ There are several ways to run a simulation:
    dictionary, as if for command-line arguments. Time-varying configuration is
    supplied as timestamped sensors.
 
-4. Using katcbfsim as a library.
+4. Mixed katcp_ and katsdptelstate_. In this case, static configuration can be
+   loaded into katsdptelstate_ later on (as attributes, rather than in the
+   :attr:`config` dictionary), and then latched by a katcp_ command.
+
+5. Using katcbfsim as a library.
 
 .. _katcp: https://pythonhosted.org/katcp/
 .. _katsdptelstate: https://github.com/ska-sa/katsdptelstate
-
-The first three methods can also be freely mixed.
 
 The configuration is split into information describing the virtual world
 (antennas, sources and so on) and information about the virtual correlator
@@ -136,14 +138,14 @@ Telescope state
 ^^^^^^^^^^^^^^^
 Command-line options can be loaded through katsdptelstate_ in the standard
 way. Antennas and sources are slightly different, however. The antennas must
-be placed in a `cbf_antennas` key, which is a list of dictionaries. Each
-dictionary has a `description` key, which is the antenna string. This is to
-allow for future expansion. The sources are similarly placed in a
-`cbf_sim_sources` key.
+be placed in a :attr:`cbf_antennas` key (in the :attr:`config` dictionary),
+which is a list of dictionaries. Each dictionary has a :attr:`description`
+key, which is the antenna string. This is to allow for future expansion. The
+sources are similarly placed in a :attr:`cbf_sim_sources` key.
 
-The target is read from the telescope state sensor `cbf_target`, using the
-latest value strictly prior to the start of the dump. Thus, all values for a
-simulation can be pre-loaded.
+The target is read from the telescope state sensor :attr:`cbf_target`, using
+the latest value strictly prior to the start of the dump. Thus, all values for
+a simulation can be pre-loaded.
 
 katcp protocol
 ^^^^^^^^^^^^^^
@@ -162,3 +164,19 @@ flow is
 
 Note that static properties cannot be changed while a capture is in progress,
 but can be modified between captures.
+
+Mixed katcp and telstate
+^^^^^^^^^^^^^^^^^^^^^^^^
+If the subarray static properties are not known at the time the simulator
+process is started, they can still be loaded from telstate later, using the
+:samp:`?configure-subarray-from-telstate` request. This takes no parameters,
+and requires that :option:`--telstate` was given on the command line.
+
+This loads additional configuration, which augments or overrides any specified
+in the :attr:`config` dictionary:
+
+- The list of antennas is obtained from
+  ``telstate['config']['antenna_mask']``, which must be a comma-separated list
+  (without whitespace). For an antenna named `name`, the attribute
+  :samp:`{name}_observer` is used to obtain the description string for the
+  antenna.
