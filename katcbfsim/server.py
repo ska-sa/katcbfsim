@@ -9,9 +9,8 @@ import functools
 from katcp import Sensor
 from katcp.kattypes import Str, Float, Int, Address, request, return_reply
 from katsdptelstate import endpoint
-from . import product
-from .product import Subarray, FXProduct
-from .stream import FXStreamSpeadFactory, FXStreamFileFactory
+from . import product, stream
+from .product import Subarray, FXProduct, BeamformerProduct
 
 
 logger = logging.getLogger(__name__)
@@ -38,7 +37,7 @@ def _product_exceptions(wrapped):
     def wrapper(*args, **kwargs):
         try:
             return wrapped(*args, **kwargs)
-        except (product.CaptureInProgressError, product.IncompleteConfigError) as e:
+        except (product.CaptureInProgressError, product.IncompleteConfigError, product.UnsupportedProductError) as e:
             return 'fail', str(e)
     functools.update_wrapper(wrapper, wrapped)
     return wrapper
@@ -80,22 +79,30 @@ class SimulatorServer(katcp.DeviceServer):
             'Dummy device status sensor. The simulator is always ok.',
             '', ['ok', 'degraded', 'fail'], initial_status=Sensor.NOMINAL))
 
-    def add_fx_product(self, name, *args, **kwargs):
-        assert name not in self._products
-        product = FXProduct(self._context, self._subarray, name, *args, **kwargs)
-        self._products[name] = product
+    def _add_product(self, product):
+        assert product.name not in self._products
+        self._products[product.name] = product
         self._product_sensors[product] = {
-            'bandwidth': Sensor.integer('{}.bandwidth'.format(name),
+            'bandwidth': Sensor.integer('{}.bandwidth'.format(product.name),
                 'The bandwidth currently configured for the data product',
                 'Hz', default=product.bandwidth, initial_status=Sensor.NOMINAL),
-            'channels': Sensor.integer('{}.channels'.format(name),
+            'channels': Sensor.integer('{}.channels'.format(product.name),
                 'The number of channels of the channelised data product',
                 '', default=product.n_channels, initial_status=Sensor.NOMINAL),
-            'centerfrequency': Sensor.integer('{}.centerfrequency'.format(name),
+            'centerfrequency': Sensor.integer('{}.centerfrequency'.format(product.name),
                 'The center frequency for the data product', 'Hz')
         }
         for sensor in self._product_sensors[product].itervalues():
             self.add_sensor(sensor)
+
+    def add_fx_product(self, name, *args, **kwargs):
+        product = FXProduct(self._context, self._subarray, name, *args, **kwargs)
+        self._add_product(product)
+        return product
+
+    def add_beamformer_product(self, name, *args, **kwargs):
+        product = BeamformerProduct(self._subarray, name, *args, **kwargs)
+        self._add_product(product)
         return product
 
     @request(Str(), Int(), Int(), Int())
@@ -107,8 +114,23 @@ class SimulatorServer(katcp.DeviceServer):
         self.add_fx_product(name, adc_rate, bandwidth, n_channels)
         return 'ok',
 
+    @request(Str(), Int(), Int(), Int(), Int(), Int())
+    @return_reply()
+    def request_product_create_beamformer(
+            self, sock, name, adc_rate, bandwidth, n_channels, timesteps, sample_bits):
+        """Create a new simulated beamformer product"""
+        if name in self._products:
+            return 'fail', 'product {} already exists'.format(name)
+        self.add_beamformer_product(name, adc_rate, bandwidth, n_channels, timesteps, sample_bits)
+        return 'ok',
+
     def set_destination(self, product, endpoints):
-        product.destination_factory = FXStreamSpeadFactory(endpoints)
+        if isinstance(product, FXProduct):
+            product.destination_factory = stream.FXStreamSpead.factory(endpoints)
+        elif isinstance(product, BeamformerProduct):
+            product.destination_factory = stream.BeamformerStreamSpead.factory(endpoints)
+        else:
+            raise product.UnsupportedProductError('unknown product type')
 
     @request(Str(), Str())
     @return_reply()
@@ -129,7 +151,10 @@ class SimulatorServer(katcp.DeviceServer):
     @_product_request
     def request_capture_destination_file(self, sock, product, destination):
         """Set the destination to an HDF5 file"""
-        product.destination_factory = FXStreamFileFactory(destination)
+        if isinstance(product, FXProduct):
+            product.destination_factory = stream.FXStreamFile.factory(destination)
+        else:
+            return 'fail', 'file capture not supported for this product type'
         return 'ok',
 
     @request(Str(default=''))
@@ -137,7 +162,7 @@ class SimulatorServer(katcp.DeviceServer):
     def request_capture_list(self, sock, req_name):
         """List the destination endpoints for a product, or all products"""
         if req_name != '' and req_name not in self._products:
-            return 'fail', 'requested product name not found'
+            return 'fail', 'requested product name "{}" not found'.format(req_name)
         for name, product in self._products.items():
             if req_name == '' or req_name == name:
                 try:
@@ -161,6 +186,21 @@ class SimulatorServer(katcp.DeviceServer):
         self.set_sync_time(timestamp)
         return 'ok',
 
+    def set_clock_ratio(self, clock_ratio):
+        self._subarray.clock_ratio = clock_ratio
+
+    @request(Float())
+    @return_reply()
+    @_product_exceptions
+    def request_clock_ratio(self, sock, clock_ratio):
+        """Set the ratio between wall clock time and simulated time. Values
+        less than 1 will cause simulated time to run faster than wall clock
+        time. Setting it to 0 will cause simulation to be done as fast as
+        possible.
+        """
+        self.set_clock_ratio(clock_ratio)
+        return 'ok',
+
     def set_target(self, target):
         self._subarray.target = target
 
@@ -173,7 +213,10 @@ class SimulatorServer(katcp.DeviceServer):
         return 'ok',
 
     def set_accumulation_length(self, product, period):
-        product.accumulation_length = period
+        if hasattr(product, 'accumulation_length'):
+            product.accumulation_length = period
+        else:
+            raise product.UnsupportedProductError('product does not support setting accumulation length')
 
     @request(Str(), Float())
     @return_reply(Float())
@@ -316,7 +359,7 @@ class SimulatorServer(katcp.DeviceServer):
         try:
             product = self._products[name]
         except KeyError:
-            raise tornado.gen.Return(('fail', 'requested product name not found'))
+            raise tornado.gen.Return(('fail', 'requested product name "{}" not found'.format(name)))
         stop = trollius.async(product.capture_stop())
         yield tornado.platform.asyncio.to_tornado_future(stop)
         raise tornado.gen.Return(('ok',))

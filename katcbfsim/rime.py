@@ -161,7 +161,7 @@ class Rime(accel.Operation):
         logger.debug('Starting update_flex_density')
         self._flux_sum = np.array([self.sefd, self.sefd], np.float32)
         for channel, freq in enumerate(self.frequencies):
-            freq_Mhz = freq / 1e6  # katpoint takes freq in MHz
+            freq_MHz = freq / 1e6  # katpoint takes freq in MHz
             for i, source in enumerate(self.sources):
                 if source.flux_model is None:
                     fd = 1.0
