@@ -21,13 +21,13 @@ def _product_request(wrapped):
     it to the wrapped function, or returns a failure message if it does not
     exist.
     """
+    @functools.wraps(wrapped)
     def wrapper(self, sock, name, *args, **kwargs):
         try:
             product = self._products[name]
         except KeyError:
-            return 'fail', 'requested product name not found'
+            return 'fail', 'requested product name "{}" not found'.format(name)
         return wrapped(self, sock, product, *args, **kwargs)
-    functools.update_wrapper(wrapper, wrapped)
     return wrapper
 
 def _product_exceptions(wrapped):
@@ -44,11 +44,25 @@ def _product_exceptions(wrapped):
 
 
 class SimulatorServer(katcp.DeviceServer):
+    """katcp server for the simulator.
+
+    Parameters
+    ----------
+    context : compute device context
+        Compute device context used for device-accelerated simulations
+    subarray : :class:`katcbfsim.product.Subarray`, optional
+        Preconfigured subarray. If not specified, an unconfigured subarray is created.
+    telstate : :class:`katsdptelstate.TelescopeState`, optional
+        Telescope state used for the :samp:`?configure-subarray-from-telstate`.
+        If not provided, that require will fail.
+    *args, **kwargs :
+        Passed to base class
+    """
 
     VERSION_INFO = ('katcbfsim-api', 1, 0)
     BUILD_INFO = ('katcbfsim', 0, 1, '')
 
-    def __init__(self, context, subarray=None, *args, **kwargs):
+    def __init__(self, context, subarray=None, telstate=None, *args, **kwargs):
         super(SimulatorServer, self).__init__(*args, **kwargs)
         self._context = context
         self._products = {}
@@ -56,6 +70,7 @@ class SimulatorServer(katcp.DeviceServer):
             self._subarray = Subarray()
         else:
             self._subarray = subarray
+        self._telstate = telstate
         # Dictionary of dictionaries, indexed by product then sensor name
         self._product_sensors = {}
 
@@ -147,7 +162,7 @@ class SimulatorServer(katcp.DeviceServer):
     def request_capture_list(self, sock, req_name):
         """List the destination endpoints for a product, or all products"""
         if req_name != '' and req_name not in self._products:
-            return 'fail', 'requested product name not found'
+            return 'fail', 'requested product name "{}" not found'.format(req_name)
         for name, product in self._products.items():
             if req_name == '' or req_name == name:
                 try:
@@ -270,6 +285,60 @@ class SimulatorServer(katcp.DeviceServer):
             sock.inform(source.description)
         return 'ok',
 
+    def configure_subarray_from_telstate(self, telstate=None):
+        """Configure subarray from sensors/attributes in telescope state."""
+        if telstate is None:
+            telstate = self._telstate
+        antenna_names = telstate['config']['antenna_mask'].split(',')
+        for name in antenna_names:
+            attribute_name = name + '_observer'
+            try:
+                antenna = telstate[attribute_name]
+            except KeyError:
+                logger.warn('Antenna description for %s not found, skipping', name)
+            else:
+                # It might be either a string or an object at this point.
+                # The constructor handles either case.
+                self.add_antenna(katpoint.Antenna(antenna))
+
+    @request()
+    @return_reply()
+    @_product_exceptions
+    def request_configure_subarray_from_telstate(self, sock):
+        """Configure the subarray using sensors and attributes in the telescope
+        state. This uses dynamic values, rather than the :samp:`config`
+        dictionary used by the command-line parser.
+        """
+        if self._telstate is None:
+            return 'fail', 'no telescope state was specified with --telstate'
+        self.configure_subarray_from_telstate()
+        return 'ok',
+
+    def configure_product_from_telstate(self, product, telstate=None):
+        if telstate is None:
+            telstate = self._telstate
+        if isinstance(product, FXProduct):
+            # Set accumulation length
+            try:
+                accumulation_length = 1.0 / telstate['sub_dump_rate']
+            except KeyError:
+                logger.warn('sub_dump_rate not found for %s, accumulation-length not set', product.name)
+            else:
+                self.set_accumulation_length(product, accumulation_length)
+
+    @request(Str())
+    @return_reply()
+    @_product_request
+    @_product_exceptions
+    def request_configure_product_from_telstate(self, sock, product):
+        """Configure product from sensors/attributes in telescope state.
+        Currently only accumulation length is set; in particular it will
+        **not** set a center frequency."""
+        if self._telstate is None:
+            return 'fail', 'no telescope state was specified with --telstate'
+        self.configure_product_from_telstate(product)
+        return 'ok',
+
     def capture_start(self, product):
         product.capture_start()
 
@@ -290,7 +359,7 @@ class SimulatorServer(katcp.DeviceServer):
         try:
             product = self._products[name]
         except KeyError:
-            raise tornado.gen.Return(('fail', 'requested product name not found'))
+            raise tornado.gen.Return(('fail', 'requested product name "{}" not found'.format(name)))
         stop = trollius.async(product.capture_stop())
         yield tornado.platform.asyncio.to_tornado_future(stop)
         raise tornado.gen.Return(('ok',))

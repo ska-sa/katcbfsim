@@ -196,6 +196,18 @@ class Subarray(object):
             logging.warn('source has no flux model; it will be assumed to be 1 Jy')
         self.sources.append(source)
 
+    def ensure_source(self, timestamp):
+        """Ensure that at least one source exists. If no source exists, a 1 Jy
+        source is placed at the phase center (which must exist at `timestamp`).
+
+        Parameters
+        ----------
+        timestamp : float
+            Time at which to look up the target
+        """
+        if not self.sources:
+            self.sources.append(self.target_at(timestamp))
+
     @property
     def sync_time(self):
         return self._sync_time
@@ -461,21 +473,22 @@ class FXProduct(CBFProduct):
     def capture_start(self):
         """Begin capturing data, if it has not been done already.
 
+        If no sources are defined, one is added at the phase center.
+
         Raises
         ------
         IncompleteConfigError
-            if the subarray has no sources, no antennas, or no target
+            if the subarray has no antennas, or no target
         IncompleteConfigError
             if no destination is defined
         """
         if not self.subarray.antennas:
             raise IncompleteConfigError('no antennas defined')
-        if not self.subarray.sources:
-            raise IncompleteConfigError('no sources defined')
         if self.destination_factory is None:
             raise IncompleteConfigError('no destination specified')
         if self.subarray.target_at(self.subarray.sync_time) is None:
             raise IncompleteConfigError('no target set')
+        self.subarray.ensure_source(self.subarray.sync_time)
         super(FXProduct, self).capture_start()
 
     def _make_predict(self):

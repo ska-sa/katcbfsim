@@ -211,12 +211,12 @@ class TestSimulationServer(object):
     @tornado.gen.coroutine
     def test_unknown_product_name(self):
         """An appropriate error is returned when using an unknown product name."""
-        yield self.assert_request_fails('^requested product name not found$', 'capture-destination', 'unknown', '127.0.0.1:7147')
-        yield self.assert_request_fails('^requested product name not found$', 'capture-destination-file', 'unknown', '/dev/null')
-        yield self.assert_request_fails('^requested product name not found$', 'capture-start', 'unknown')
-        yield self.assert_request_fails('^requested product name not found$', 'capture-stop', 'unknown')
-        yield self.assert_request_fails('^requested product name not found$', 'accumulation-length', 'unknown', 0.5)
-        yield self.assert_request_fails('^requested product name not found$', 'frequency-select', 'unknown', 1000000000)
+        yield self.assert_request_fails('^requested product name "unknown" not found$', 'capture-destination', 'unknown', '127.0.0.1:7147')
+        yield self.assert_request_fails('^requested product name "unknown" not found$', 'capture-destination-file', 'unknown', '/dev/null')
+        yield self.assert_request_fails('^requested product name "unknown" not found$', 'capture-start', 'unknown')
+        yield self.assert_request_fails('^requested product name "unknown" not found$', 'capture-stop', 'unknown')
+        yield self.assert_request_fails('^requested product name "unknown" not found$', 'accumulation-length', 'unknown', 0.5)
+        yield self.assert_request_fails('^requested product name "unknown" not found$', 'frequency-select', 'unknown', 1000000000)
 
     @async_test
     @tornado.gen.coroutine

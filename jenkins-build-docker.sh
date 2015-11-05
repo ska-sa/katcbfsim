@@ -8,5 +8,5 @@ fi
 set +x   # Avoid showing password in log
 docker login -e "jenkins@gpu-dev.kat.ac.za" -u "$REGISTRY_USERNAME" -p "$REGISTRY_PASSWORD" "$REGISTRY"
 set -x
-docker build --pull=true -t "$REGISTRY/katcbfsim:$LABEL" .
+docker build --pull=true --no-cache=true -t "$REGISTRY/katcbfsim:$LABEL" .
 docker push "$REGISTRY/katcbfsim:$LABEL"
