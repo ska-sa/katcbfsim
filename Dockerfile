@@ -33,7 +33,7 @@ RUN pip install --no-deps \
     pyephem==3.7.6.0 \
     manhole==1.3.0 \
     six==1.9.0 \
-    spead2==0.3.0 \
+    spead2==0.4.4 \
     tornado==4.2 \
     trollius==2.0 \
     git+ssh://git@github.com/ska-sa/katcp-python \
