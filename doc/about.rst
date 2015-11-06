@@ -1,7 +1,14 @@
 About katcbfsim
 ===============
-katcbfsim is a correlator simulator, which is intended to match the output
-formats used by the MeerKAT CBF. It currently models the following effects:
+katcbfsim is a correlator and beamformer simulator, which is intended to match
+the output formats used by the MeerKAT CBF.
+
+Features
+--------
+
+Correlator
+^^^^^^^^^^
+The correlator simulation currently models the following effects:
 
 - Unpolarised point sources
 
@@ -27,8 +34,6 @@ The following are not (yet) modelled:
 
 - Time and frequency smearing (values are point-sampled)
 
-- Separation between simulation rate and 
-
 - Extended sources
 
 - Gain drift
@@ -39,11 +44,26 @@ The following are not (yet) modelled:
 
 - RFI
 
+- Quantisation effects
+
+In addition, a simplified statistical model of noise is used, which does not
+account for correlations between visibilities.
+
+Beamformer
+^^^^^^^^^^
+The beamformer simulation is much more basic. It simulates only the metadata,
+and the data is meaningless. As such, the antennas, sources, target etc do not
+need to be specified.
+
 Installation
 ------------
 Installation uses the normal setup.py, with the caveat that katcp must be at
 least 0.6.x (which is not yet released on PyPI, and hence cannot be expressed
 as a setuptools requirement).
+
+A CUDA-capable GPU and corresponding drivers must be present. This is currently
+the case for the beamformer simulation as well, even though it is not used in
+this case.
 
 Using katcbfsim
 ---------------
@@ -82,7 +102,8 @@ The world information needed is:
 - The point sources. Each is given by a string that can be parsed by
   :class:`katpoint.Target`, and should include a flux model. The source is
   ignored for frequencies outside the support of the flux model. If no flux
-  model is given, 1 Jy is assumed at all frequencies.
+  model is given, 1 Jy is assumed at all frequencies. If no sources are given,
+  a point source is simulated at the initial phase centre.
 
 - The sync time, as a UNIX timestamp. This is the start time of the first
   dump, and also the time reported as the `sync_time` in the SPEAD metadata.
@@ -100,21 +121,33 @@ The product information is:
 - A destination, which is a hostname and port for the SPEAD stream, or the
   name of an HDF5 file.
 
-- An accumulation length for integrations, in seconds. The actual value is
-  rounded in the same way that the MeerKAT correlator would.
+- For correlation:
+
+  - An accumulation length for integrations, in seconds. The actual value is
+    rounded in the same way that the MeerKAT correlator would.
+
+- For beamforming:
+
+  - The number of time samples included in each heap.
+  - The number of bits per sample.
 
 Command-line
 ^^^^^^^^^^^^
-Run :program:`cbfsim.py` :option:`--help` to see the names of the
-command-line options. Only a few options will be documented here.
+Run :program:`cbfsim.py` :option:`--help` to see the command-line options. Only
+a few key options are documented here.
 
 .. program:: cbfsim.py
 
 .. option:: --create-fx-product <NAME>
 
-   This creates a product with the given name. If this option is not specified,
-   then the katcp request :samp:`product-create-correlator` must be used to
-   create products.
+   This creates a correlator product with the given name. If this option is not
+   specified, then the katcp request :samp:`product-create-correlator` must be
+   used to create products.
+
+.. option:: --create-beamformer-product <NAME>
+
+   This is equivalent to :option:`--create-fx-product` but for beamformer
+   products.
 
 .. option:: --start
 
@@ -180,3 +213,8 @@ in the :attr:`config` dictionary:
   (without whitespace). For an antenna named `name`, the attribute
   :samp:`{name}_observer` is used to obtain the antenna. It can be specified as
   either a description string or an antenna object.
+
+The :samp:`?configure-product-from-telstate` request is similar, but takes a
+product name and configures the product:
+
+- The requested dump rate is loaded from ``telstate['sub_dump_rate']``.
