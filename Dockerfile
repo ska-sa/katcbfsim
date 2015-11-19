@@ -1,4 +1,4 @@
-FROM sdp-ingest5.kat.ac.za:5000/docker-base-gpu:docker-refactor
+FROM sdp-ingest5.kat.ac.za:5000/docker-base-gpu
 
 MAINTAINER Bruce Merry "bmerry@ska.ac.za"
 
