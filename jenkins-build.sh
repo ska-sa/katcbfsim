@@ -1,9 +1,7 @@
 #!/bin/bash
 set -e -x
 pip install -U pip setuptools wheel
-pip install numpy  # Some requirements need it already installed
-pip install coverage
-pip install -r requirements.txt
-pip install .[test]
+install-requirements.py -d ~/docker-base/base-requirements.txt -d ~/docker-base/gpu-requirements.txt \
+    -r requirements.txt -r test-requirements.txt
 export CUDA_DEVICE=0
-nosetests --no-path-adjustment --with-xunit --with-coverage --cover-erase --cover-xml --cover-inclusive --cover-package=katcbfsim
+nosetests --with-xunit --with-coverage --cover-erase --cover-xml --cover-inclusive --cover-package=katcbfsim
