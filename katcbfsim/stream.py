@@ -283,6 +283,8 @@ class BeamformerStreamSpead(CBFSpeadStream):
         else:
             in_rate = product.n_channels * product.timesteps * 2 * product.sample_bits / product.wall_interval / 8
         super(BeamformerStreamSpead, self).__init__(endpoints, product, in_rate)
+        #Setting flavour to not be bug compatible here, will be set to PYSPEAD bug compatible automatically in stream init
+        self._flavour = spead2.Flavour(4, 64, 48, 0)
         self.xeng_acc_len = self.product.timesteps
         self._ig_static = self._make_ig_static()
         self._ig_weights = self._make_ig_weights()
@@ -292,19 +294,21 @@ class BeamformerStreamSpead(CBFSpeadStream):
 
     def _make_ig_static(self):
         ig = spead2.send.ItemGroup(flavour=self._flavour)
+        self.add_scale_factor_timestamp_item(ig)
+        self.add_sync_time_item(ig)
         self.add_adc_sample_rate_item(ig)
         self.add_n_chans_item(ig)
         self.add_n_ants_item(ig)
         ig.add_item(0x100F, 'n_bengs', 'The total number of B engines in a beamformer system.',
             (), format=self._inline_format, value=1)
-        self.add_center_freq_item(ig)
+        # self.add_center_freq_item(ig)
         self.add_bandwidth_item(ig)
-        self.add_xeng_acc_len_item(ig)
+        # self.add_xeng_acc_len_item(ig)
         self.add_requant_bits_item(ig)
         self.add_fft_shift_item(ig)
         # ICD strongly implies that feng_pkt_len is the same as xeng_acc_len
-        ig.add_item(0x1021, 'feng_pkt_len', 'Payload size of packet exchange between F and X engines in 64 bit words. Usually equal to the number of spectra accumulated inside X engine. F-engine correlator internals.',
-            (), format=self._inline_format, value=self.xeng_acc_len)
+        # ig.add_item(0x1021, 'feng_pkt_len', 'Payload size of packet exchange between F and X engines in 64 bit words. Usually equal to the number of spectra accumulated inside X engine. F-engine correlator internals.',
+            # (), format=self._inline_format, value=self.xeng_acc_len)
         # ddc_mix_freq omitted, since the correct value isn't known
         # ig.add_item(0x1043, 'ddc_mix_freq', 'Digital downconverter mixing frequency as a fraction of the ADC sampling frequency. eg: 0.25. Set to zero if no DDC is present.',
         #     (), format=[('f', 64)], value=0.0)
@@ -312,6 +316,11 @@ class BeamformerStreamSpead(CBFSpeadStream):
         self.add_rx_udp_items(ig)
         ig.add_item(0x1050, 'beng_out_bits_per_sample', 'The number of bits per value of the beng accumulator output. Note this is for a single component value, not the combined complex size.',
             (), format=self._inline_format, value=self.product.sample_bits)
+        beamweight = np.zeros((2 * self.product.n_antennas,), np.int32)
+        ig.add_item(0x2000, 'beamweight', 'The unitless digital scaling factors implemented prior to combining signals for this beam. See 0x100E (input_labelling) to get mapping from inputN to user defined input string.',
+            beamweight.shape, beamweight.dtype, value=beamweight)
+        ig.add_item(0x1047, 'b_per_fpga', 'The number of b-engines per fpga.',
+            beamweight.shape, beamweight.dtype, value=beamweight)
         return ig
 
     def _make_ig_weights(self):
@@ -346,10 +355,10 @@ class BeamformerStreamSpead(CBFSpeadStream):
     @trollius.coroutine
     def send_metadata(self):
         """Reissue all the metadata on the stream."""
-        heap = self._ig_timing.get_heap(descriptors='all', data='all')
-        yield From(self._stream.async_send_heap(heap))
-        heap = self._ig_weights.get_heap(descriptors='all', data='all')
-        yield From(self._stream.async_send_heap(heap))
+        # heap = self._ig_timing.get_heap(descriptors='all', data='all')
+        # yield From(self._stream.async_send_heap(heap))
+        # heap = self._ig_weights.get_heap(descriptors='all', data='all')
+        # yield From(self._stream.async_send_heap(heap))
         heap = self._ig_static.get_heap(descriptors='all', data='all')
         yield From(self._stream.async_send_heap(heap))
         heap = self._ig_labels.get_heap(descriptors='all', data='all')
