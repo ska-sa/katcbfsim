@@ -684,10 +684,11 @@ class BeamformerProduct(CBFProduct):
     wall_interval : float
         Equivalent to :attr:`interval`, but in wall-clock time
     """
-    def __init__(self, subarray, name, adc_rate, bandwidth, n_channels, timesteps, sample_bits, loop=None):
+    def __init__(self, subarray, name, adc_rate, bandwidth, n_channels, timesteps, sample_bits, b_per_fpga, loop=None):
         super(BeamformerProduct, self).__init__(subarray, name, adc_rate, bandwidth, n_channels, loop)
         self.timesteps = timesteps
         self.sample_bits = sample_bits
+        self.b_per_fpga = b_per_fpga
         if sample_bits == 8:
             self.dtype = np.int8
         elif sample_bits == 16:

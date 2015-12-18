@@ -320,7 +320,10 @@ class BeamformerStreamSpead(CBFSpeadStream):
         ig.add_item(0x2000, 'beamweight', 'The unitless digital scaling factors implemented prior to combining signals for this beam. See 0x100E (input_labelling) to get mapping from inputN to user defined input string.',
             beamweight.shape, beamweight.dtype, value=beamweight)
         ig.add_item(0x1047, 'b_per_fpga', 'The number of b-engines per fpga.',
-            beamweight.shape, beamweight.dtype, value=beamweight)
+            (), format=self._inline_format, value=self.product.b_per_fpga)
+        ig = spead2.send.ItemGroup(flavour=self._flavour)
+        self.add_input_labelling_item(ig)
+
         return ig
 
     def _make_ig_weights(self):
