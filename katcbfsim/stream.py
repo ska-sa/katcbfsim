@@ -321,7 +321,7 @@ class BeamformerStreamSpead(CBFSpeadStream):
             beamweight.shape, beamweight.dtype, value=beamweight)
         ig.add_item(0x1047, 'b_per_fpga', 'The number of b-engines per fpga.',
             (), format=self._inline_format, value=self.product.b_per_fpga)
-        ig = spead2.send.ItemGroup(flavour=self._flavour)
+        # ig = spead2.send.ItemGroup(flavour=self._flavour)
         self.add_input_labelling_item(ig)
 
         return ig
@@ -364,10 +364,10 @@ class BeamformerStreamSpead(CBFSpeadStream):
         # yield From(self._stream.async_send_heap(heap))
         heap = self._ig_static.get_heap(descriptors='all', data='all')
         yield From(self._stream.async_send_heap(heap))
-        heap = self._ig_labels.get_heap(descriptors='all', data='all')
-        yield From(self._stream.async_send_heap(heap))
-        heap = self._ig_data.get_heap(descriptors='all', data='none')
-        yield From(self._stream.async_send_heap(heap))
+        # heap = self._ig_labels.get_heap(descriptors='all', data='all')
+        # yield From(self._stream.async_send_heap(heap))
+        # heap = self._ig_data.get_heap(descriptors='all', data='none')
+        # yield From(self._stream.async_send_heap(heap))
 
     @trollius.coroutine
     def send(self, beam_data, index):
