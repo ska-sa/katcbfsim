@@ -444,7 +444,7 @@ class FXProduct(CBFProduct):
         super(FXProduct, self).__init__(subarray, name, adc_rate, bandwidth, n_channels, loop)
         self.context = context
         self.accumulation_length = 0.5
-        self.sefd = 20.0
+        self.sefd = 400.0   # Jansky
         self.seed = 1
 
     @property
