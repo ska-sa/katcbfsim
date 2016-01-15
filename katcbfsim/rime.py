@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class RimeTemplate(object):
-    autotune_version = 2
+    autotune_version = 3
 
     def __init__(self, context, max_antennas, tuning=None):
         self.context = context
@@ -117,6 +117,8 @@ class Rime(accel.Operation):
         self._scaled_phase_host = self._scaled_phase.empty_like()
         self._flux_density = accel.DeviceArray(command_queue.context, (n_channels, n_sources, 2, 2), np.complex64)
         self._flux_density_host = self._flux_density.empty_like()
+        self._flux_sum = accel.DeviceArray(command_queue.context, (n_channels, 2), np.float32)
+        self._flux_sum_host = self._flux_sum.empty_like()
         # Set up the internal baseline mapping
         # TODO: this could live in the template
         self._baselines = accel.DeviceArray(command_queue.context, (n_padded_baselines, 2), np.int16)
@@ -159,7 +161,7 @@ class Rime(accel.Operation):
         must wait for it to complete before calling the function again.
         """
         logger.debug('Starting update_flex_density')
-        self._flux_sum = np.array([self.sefd, self.sefd], np.float32)
+        self._flux_sum_host.fill(self.sefd)
         for channel, freq in enumerate(self.frequencies):
             freq_MHz = freq / 1e6  # katpoint takes freq in MHz
             for i, source in enumerate(self.sources):
@@ -176,10 +178,11 @@ class Rime(accel.Operation):
                 self._flux_density_host[channel, i, 0, 1] = 0.0
                 self._flux_density_host[channel, i, 1, 0] = 0.0
                 self._flux_density_host[channel, i, 1, 1] = fd
-                self._flux_sum[0] += fd
-                self._flux_sum[1] += fd
+                self._flux_sum_host[channel, 0] += fd
+                self._flux_sum_host[channel, 1] += fd
         logger.debug('Host flux densities updated')
         self._flux_density.set_async(self.command_queue, self._flux_density_host)
+        self._flux_sum.set_async(self.command_queue, self._flux_sum_host)
 
     def _update_scaled_phase(self):
         """Compute the propagation delay phase for each source and antenna.
@@ -235,8 +238,7 @@ class Rime(accel.Operation):
             [
                 out.buffer,
                 np.int32(out.padded_shape[1]),
-                self._flux_sum[0],
-                self._flux_sum[1],
+                self._flux_sum.buffer,
                 gain.buffer,
                 np.int32(gain.padded_shape[1]),
                 self._baselines.buffer,

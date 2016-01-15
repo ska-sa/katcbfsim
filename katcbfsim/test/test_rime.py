@@ -97,8 +97,9 @@ class TestRime(object):
         gain = np.tile(np.identity(2, np.complex64), (n_channels, n_antennas, 1, 1))
         fn.buffer('gain').set(queue, gain)
         # We didn't specify the sources, so we need to fudge the total flux
-        fn._flux_sum[0] = B[0, 0].real + sefd
-        fn._flux_sum[1] = B[1, 1].real + sefd
+        fn._flux_sum_host[..., 0] = B[0, 0].real + sefd
+        fn._flux_sum_host[..., 1] = B[1, 1].real + sefd
+        fn._flux_sum.set(queue, fn._flux_sum_host)
 
         ### Predict expected visibilities
         predict = []
@@ -167,7 +168,7 @@ class TestRime(object):
                             # purely real, making the covariance matrix singular,
                             # where boxm_test and ttest_1samp break down.
                             if i == j and k == l:
-                                assert_true(np.all(cur[1, ...] == 0))
+                                assert_true(np.all(np.abs(cur[1, ...]) <= 1e-10))
                                 assert_true(np.all(ds[1, ...] == 0))
                                 cur = cur[0:1]
                                 ds = ds[0:1]

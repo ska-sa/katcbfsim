@@ -29,7 +29,7 @@ typedef union
 } in_out;
 
 /**
- * This kernel combined several operations:
+ * This kernel combines several operations:
  * - Sample visibilities from a statistical distribution.
  * - Apply per-antenna gains.
  * - Quantise to integer.
@@ -41,7 +41,8 @@ typedef union
  * example.
  *
  * @param [in,out] data   On input, expected value for a single correlation product. On output, a sample for the accumulated visibility. Frequency-major.
- * @param flux_sum        Diagonal elements of sum of all the brightness matrices and the system equivalent flux density
+ * @param data_stride     Element stride for @a data
+ * @param flux_sum        Diagonal elements of sum of all the brightness matrices and the system equivalent flux density, indexed by frequency
  * @param gain            Jones matrix per antenna, frequency-major
  * @param baselines       Indices of the two antennas for each baseline
  * @param n_channels      Number of frequencies
@@ -53,8 +54,7 @@ typedef union
 KERNEL void sample(
     GLOBAL in_out * RESTRICT data,
     int data_stride,
-    float flux_sum_x,
-    float flux_sum_y,
+    const GLOBAL float2 * RESTRICT flux_sum,
     const GLOBAL jones * RESTRICT gain,
     int gain_stride,
     const GLOBAL short2 * RESTRICT baselines,
@@ -84,10 +84,11 @@ KERNEL void sample(
     seed += ((sequence * f_step + f) * n_baselines + b) * 1099511628211ULL;
     curandState_t state;
     curand_init(seed, 0, 0, &state);
-    float flux_sum[2] = {flux_sum_x, flux_sum_y};
 
     for (; f < n_channels; f += f_step)
     {
+        float2 flux_sum_tmp = flux_sum[f];
+        float flux_sum_parts[2] = {flux_sum_tmp.x, flux_sum_tmp.y};
         int data_idx = f * data_stride + b;
         jones predict = data[data_idx].in;
         jones sample;
@@ -95,7 +96,7 @@ KERNEL void sample(
             for (int j = 0; j < 2; j++)
             {
                 // TODO: could precompute A.
-                float A = 0.5f * n_accs * flux_sum[i] * flux_sum[j];
+                float A = 0.5f * n_accs * flux_sum_parts[i] * flux_sum_parts[j];
                 float B = 0.5f * n_accs * (sqr(predict.m[i][j].x) - sqr(predict.m[i][j].y));
                 float rr = A + B;
                 float ii = A - B;
