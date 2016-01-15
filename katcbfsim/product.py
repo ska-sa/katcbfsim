@@ -7,6 +7,7 @@ from katsdptelstate import endpoint
 from katsdpsigproc import accel
 import katpoint
 import numpy as np
+import math
 from . import rime
 
 
@@ -145,6 +146,8 @@ class Subarray(object):
     sync_time : :class:`katpoint.Timestamp`
         Start time for the simulated capture. When set, it is truncated to a
         whole number of seconds.
+    gain : float
+        Expected output visibility value, per Jansky per Hz per second
     clock_ratio : float
         Scale factor between virtual time in the simulation and wall clock
         time. Smaller values will run the simulation faster; setting it to 0
@@ -155,6 +158,7 @@ class Subarray(object):
         self.sources = []
         self.target = None
         self._sync_time = katpoint.Timestamp()
+        self._gain = 1e-4
         self._clock_ratio = 1.0
         self.capturing = 0     # Number of products that are capturing
 
@@ -217,6 +221,16 @@ class Subarray(object):
         if self.capturing:
             raise CaptureInProgressError('cannot set sync time while capture is in progress')
         self._sync_time = katpoint.Timestamp(int(value.secs))
+
+    @property
+    def gain(self):
+        return self._gain
+
+    @gain.setter
+    def gain(self, value):
+        if self.capturing:
+            raise CaptureInProgressError('cannot set gain while capture is in progress')
+        self._gain = value
 
     @property
     def clock_ratio(self):
@@ -516,8 +530,10 @@ class FXProduct(CBFProduct):
         # for now it is just real and diagonal.
         gain_host = predict.buffer('gain').empty_like()
         gain_host.fill(0)
-        gain_host[:, :, 0, 0].fill(0.01)
-        gain_host[:, :, 1, 1].fill(0.01)
+        baseline_gain = self.subarray.gain * self.bandwidth / self.n_channels * self.accumulation_length
+        antenna_gain = math.sqrt(baseline_gain)
+        gain_host[:, :, 0, 0].fill(antenna_gain)
+        gain_host[:, :, 1, 1].fill(antenna_gain)
         predict.buffer('gain').set(predict.command_queue, gain_host)
         data = [predict.buffer('out')]
         data.append(accel.DeviceArray(self.context, data[0].shape, data[0].dtype, data[0].padded_shape))

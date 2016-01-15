@@ -247,6 +247,17 @@ class SimulatorServer(katcp.DeviceServer):
         self.set_center_frequency(product, frequency)
         return 'ok',
 
+    def set_gain(self, gain):
+        self._subarray.gain = gain
+
+    @request(Str(), Float())
+    @return_reply()
+    @_product_exceptions
+    def request_gain(self, sock, gain):
+        """Set the system-wide gain, as the expected visibility value per
+        Hz of channel bandwidth per second of integration."""
+        self.set_gain(gain)
+
     def add_antenna(self, antenna):
         self._subarray.add_antenna(antenna)
 

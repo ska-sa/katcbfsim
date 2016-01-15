@@ -65,6 +65,7 @@ def prepare_server(server, args):
                 server.add_antenna(katpoint.Target(line))
     if args.cbf_sync_time is not None:
         server.set_sync_time(args.cbf_sync_time)
+    server.set_gain(args.cbf_sim_gain)
     if args.cbf_target is not None:
         server.set_target(katpoint.Target(args.cbf_target))
     if args.create_fx_product is not None:
@@ -103,6 +104,7 @@ def main():
     parser.add_argument('--cbf-sim-source', dest='cbf_sim_sources', type=parse_source, action='append', default=[], metavar='DESCRIPTION', help='Specify a source object (can be used multiple times)')
     parser.add_argument('--cbf-sim-source-file', metavar='FILE', help='Load source descriptions from file, one per line')
     parser.add_argument('--cbf-sim-clock-ratio', type=float, default=1.0, metavar='RATIO', help='Ratio of real time to simulated time (<1 to run faster than real time, >1 for slower)')
+    parser.add_argument('--cbf-sim-gain', type=float, default=1e-4, metavar='GAIN', help='Expected visibility for integrating 1Hz for 1s with a 1Jy source')
     parser.add_argument('--cbf-target', metavar='DESCRIPTION', help='Set initial target')
     parser.add_argument('--beamformer-timesteps', metavar='TIMES', type=int, default=256, help='Spectra included in each beamformer heap [%(default)s]')
     parser.add_argument('--beamformer-bits', metavar='BITS', type=int, choices=[8, 16, 32], default=8, help='Bits per real value in beamformer data [%(default)s]')

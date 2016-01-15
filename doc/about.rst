@@ -112,6 +112,11 @@ The world information needed is:
   simulated beam. This is also a string that can be parsed by
   :class:`katpoint.Target`. This can be changed over time.
 
+- A gain (scaling factor between flux densities and counts). Generated values
+  in Jansky are converted to output values by scaling by this gain. It is
+  expressed as a scale factor per Hz of channel bandwidth per second of
+  integration time.
+
 The product information is:
 
 - A name, which is used in katcp requests and sensor names.
@@ -166,6 +171,10 @@ a few key options are documented here.
 .. option:: --cbf-sim-source <DESCRIPTION>, --cbf-sim-source-file <FILENAME>
 
    These are similar, but for sources rather than antennas.
+
+.. option:: --cbf-sim-gain <FACTOR>
+
+   System-wide gain, as described above
 
 Telescope state
 ^^^^^^^^^^^^^^^
