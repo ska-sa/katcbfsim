@@ -21,7 +21,7 @@ class SpeadStream(object):
     def factory(cls, endpoints):
         return functools.partial(cls, endpoints)
 
-    def __init__(self, endpoints, product, in_rate):
+    def __init__(self, endpoints, product, in_rate, max_packet_size = 9172):
         if len(endpoints) != 1:
             raise ValueError('Only exactly one endpoint is currently supported')
         self.endpoint = endpoints[0]
@@ -31,7 +31,7 @@ class SpeadStream(object):
         # Send at a slightly higher rate, to account for overheads, and so
         # that if the sender sends a burst we can catch up with it.
         out_rate = in_rate * 1.05
-        config = spead2.send.StreamConfig(rate=out_rate, max_packet_size=9172)
+        config = spead2.send.StreamConfig(rate=out_rate, max_packet_size= max_packet_size)
         self._stream = spead2.send.trollius.UdpStream(
             spead2.ThreadPool(), endpoints[0].host, endpoints[0].port, config)
 
@@ -282,7 +282,7 @@ class BeamformerStreamSpead(CBFSpeadStream):
             in_rate = 0
         else:
             in_rate = product.n_channels * product.timesteps * 2 * product.sample_bits / product.wall_interval / 8
-        super(BeamformerStreamSpead, self).__init__(endpoints, product, in_rate)
+        super(BeamformerStreamSpead, self).__init__(endpoints, product, in_rate, max_packet_size = max_packet_size)
         #Setting flavour to not be bug compatible here, will be set to PYSPEAD bug compatible automatically in stream init
         self._flavour = spead2.Flavour(4, 64, 48, 0)
         self.xeng_acc_len = self.product.timesteps
