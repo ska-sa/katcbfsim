@@ -282,7 +282,7 @@ class BeamformerStreamSpead(CBFSpeadStream):
             in_rate = 0
         else:
             in_rate = product.n_channels * product.timesteps * 2 * product.sample_bits / product.wall_interval / 8
-        super(BeamformerStreamSpead, self).__init__(endpoints, product, in_rate, max_packet_size = max_packet_size)
+        super(BeamformerStreamSpead, self).__init__(endpoints, product, in_rate, max_packet_size = 4196)
         #Setting flavour to not be bug compatible here, will be set to PYSPEAD bug compatible automatically in stream init
         self._flavour = spead2.Flavour(4, 64, 48, 0)
         self.xeng_acc_len = self.product.timesteps
