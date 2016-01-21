@@ -5,6 +5,8 @@ import pkg_resources
 import numpy as np
 import katpoint
 import logging
+import math
+import scipy.special
 from katsdpsigproc import accel, tune
 
 
@@ -154,8 +156,8 @@ class Rime(accel.Operation):
         self.phase_center = direction
 
     def _update_flux_density(self):
-        """Set the per-channel flux density from the flux models of the
-        sources.
+        """Set the per-channel perceived flux density from the flux models of
+        the sources and a simple beam model.
 
         This performs an **asynchronous** transfer to the GPU, and the caller
         must wait for it to complete before calling the function again.
@@ -164,6 +166,12 @@ class Rime(accel.Operation):
         self._flux_sum_host.fill(self.sefd)
         for channel, freq in enumerate(self.frequencies):
             freq_MHz = freq / 1e6  # katpoint takes freq in MHz
+            # Determine scaling factor for Airy function
+            wavelength = katpoint.lightspeed / freq
+            k = 2 * math.pi / wavelength
+            ka = k * (0.5 * self.antennas[0].diameter)
+            # 1.029 is the beam width factor for an ideal Airy disk
+            airy_scale = ka * 1.029 / self.antennas[0].beamwidth
             for i, source in enumerate(self.sources):
                 if source.flux_model is None:
                     fd = 1.0
@@ -172,6 +180,16 @@ class Rime(accel.Operation):
                     # Assume zero emission outside the defined frequency range.
                     if np.isnan(fd):
                         fd = 0.0
+                # Evaluate Airy beam model. It uses azel internally, so it needs an
+                # antenna.
+                angle = source.separation(self.phase_center, timestamp=self.time, antenna=self.antennas[0])
+                x = math.sin(angle) * airy_scale
+                if abs(x) < 1e-5:
+                    beam = 1.0
+                else:
+                    beam = (2 * scipy.special.j1(x) / x)**2
+                fd *= beam
+
                 # katpoint currently doesn't model polarised sources, so
                 # set up a diagonal brightness matrix
                 self._flux_density_host[channel, i, 0, 0] = fd
