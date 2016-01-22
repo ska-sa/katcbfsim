@@ -14,6 +14,9 @@ The correlator simulation currently models the following effects:
 
 - Statistical noise
 
+- A simple antenna-independent Airy beam model (all antennas are assumed to
+  point in the same direction, and thus share a perceived sky).
+
 The following are currently implemented internally, but not yet exposed:
 
 - A per-frequency per-antenna full-Jones gain
@@ -24,7 +27,7 @@ The following are currently implemented internally, but not yet exposed:
 
 The following are not (yet) modelled:
 
-- Direction-dependent effects, such as a beam model
+- Direction-dependent effects other than a primary beam
 
 - Atmospheric effects
 
@@ -70,7 +73,7 @@ Using katcbfsim
 There are several ways to run a simulation, which can also be mixed.
 
 1. Command-line only. In this mode, the target (phase centre) is fixed for the
-   simulation.
+   simulation, and it is also the pointing direction.
 
 2. Using katcp_. The sources, antennas, target etc are specified through katcp
    commands. In this mode, it is possible to simulate multiple products, and
@@ -108,9 +111,12 @@ The world information needed is:
 - The sync time, as a UNIX timestamp. This is the start time of the first
   dump, and also the time reported as the `sync_time` in the SPEAD metadata.
 
-- The target, i.e., phase centre. In future this will also be the centre of a
-  simulated beam. This is also a string that can be parsed by
+- The target, i.e., phase centre. This is also a string that can be parsed by
   :class:`katpoint.Target`. This can be changed over time.
+
+- The pointing direction, used for the primary beam model. Like the target,
+  this is a :class:`katpoint.Target` string and can be changed over time. If
+  it is never specified, it defaults to being the same as the target.
 
 - A gain (scaling factor between flux densities and counts). Generated values
   in Jansky are converted to output values by scaling by this gain. It is
@@ -188,6 +194,12 @@ sources are similarly placed in a :attr:`cbf_sim_sources` key.
 The target is read from the telescope state sensor :attr:`cbf_target`, using
 the latest value strictly prior to the start of the dump. Thus, all values for
 a simulation can be pre-loaded.
+
+The pointing direction is specified by the telescope state sensors
+:attr:`ant_pos_actual_scan_azim` and :attr:`ant_pos_actual_scan_elev`, where
+`ant` is replaced by the name of the first antenna. These provide the azimuth
+and elevation, in degrees, for the first antenna. In future, other antenna
+directions might be used, but for now they are ignored.
 
 katcp protocol
 ^^^^^^^^^^^^^^
