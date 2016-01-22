@@ -48,6 +48,21 @@ class TelstateSubarray(Subarray):
         # Failed, so fall back to the base class
         return super(TelstateSubarray, self).target_at(timestamp)
 
+    def position_at(self, timestamp):
+        try:
+            antenna_name = self.antennas[0].name
+            azim = self._telstate.get_range(antenna_name + '_pos_actual_scan_azim', None, timestamp.secs)
+            elev = self._telstate.get_range(antenna_name + '_pos_actual_scan_elev', None, timestamp.secs)
+            if azim and elev:
+                # [-1][0] gives last element, value part of tuple
+                azim = katpoint.deg2rad(azim[-1][0])
+                elev = katpoint.deg2rad(elev[-1][0])
+                return katpoint.construct_azel_target(azim, elev)
+        except KeyError:
+            pass
+        # Failed, so fall back to the base class
+        return super(TelstateSubarray, self).position_at(timestamp)
+
 
 def prepare_server(server, args):
     """Do server configuration specified by command-line configuration"""

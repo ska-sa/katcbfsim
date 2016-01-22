@@ -5,6 +5,7 @@ import pkg_resources
 import numpy as np
 import katpoint
 import logging
+import scipy.special
 from katsdpsigproc import accel, tune
 
 
@@ -99,6 +100,7 @@ class Rime(accel.Operation):
             accel.roundup(n_baselines, template.sample_wgs))
         self.time = katpoint.Timestamp()
         self.phase_center = katpoint.construct_radec_target(0, 0)
+        self.position = None
         _2 = accel.Dimension(2, exact=True)
         self.slots['out'] = accel.IOSlot((n_channels, n_baselines, _2, _2, _2), np.int32)
         self.slots['gain'] = accel.IOSlot((n_channels, n_antennas, _2, _2), np.complex64)
@@ -109,12 +111,14 @@ class Rime(accel.Operation):
         channel_width = bandwidth / n_channels
         min_frequency = center_frequency - bandwidth / 2
         self.frequencies = np.arange(0.5, n_channels) * channel_width + min_frequency
+        logging.info("Frequencies %s", self.frequencies)
         inv_wavelength = self._inv_wavelength.empty_like()
         inv_wavelength[:] = (self.frequencies / katpoint.lightspeed).astype(np.float32)
         self._inv_wavelength.set(command_queue, inv_wavelength)
         # Set up internal arrays
         self._scaled_phase = accel.DeviceArray(command_queue.context, (n_sources, n_antennas), np.float32)
         self._scaled_phase_host = self._scaled_phase.empty_like()
+        self._flux_models = np.empty((n_channels, n_sources), np.float32)
         self._flux_density = accel.DeviceArray(command_queue.context, (n_channels, n_sources, 2, 2), np.complex64)
         self._flux_density_host = self._flux_density.empty_like()
         self._flux_sum = accel.DeviceArray(command_queue.context, (n_channels, 2), np.float32)
@@ -131,7 +135,7 @@ class Rime(accel.Operation):
                 baselines_host[next_baseline, 1] = j
                 next_baseline += 1
         self._baselines.set(command_queue, baselines_host)
-        self._update_flux_density()
+        self._sample_flux_models()
         self.command_queue.finish()  # _update_flush_density is asynchronous
 
     def set_time(self, time):
@@ -145,7 +149,7 @@ class Rime(accel.Operation):
         self.time = time
 
     def set_phase_center(self, direction):
-        """Set the direction of the phase center for the simulation
+        """Set the direction of the phase center for the simulation.
 
         Parameters
         ----------
@@ -153,15 +157,15 @@ class Rime(accel.Operation):
         """
         self.phase_center = direction
 
-    def _update_flux_density(self):
-        """Set the per-channel flux density from the flux models of the
-        sources.
-
-        This performs an **asynchronous** transfer to the GPU, and the caller
-        must wait for it to complete before calling the function again.
+    def set_position(self, direction):
+        """Set the dish pointing direction for the simulation. If this is never
+        set, it defaults to the phase center.
         """
-        logger.debug('Starting update_flex_density')
-        self._flux_sum_host.fill(self.sefd)
+        self.position = direction
+
+    def _sample_flux_models(self):
+        """Sample the flux models of the sources."""
+        logger.debug('Starting _sample_flux_models')
         for channel, freq in enumerate(self.frequencies):
             freq_MHz = freq / 1e6  # katpoint takes freq in MHz
             for i, source in enumerate(self.sources):
@@ -172,14 +176,43 @@ class Rime(accel.Operation):
                     # Assume zero emission outside the defined frequency range.
                     if np.isnan(fd):
                         fd = 0.0
-                # katpoint currently doesn't model polarised sources, so
-                # set up a diagonal brightness matrix
-                self._flux_density_host[channel, i, 0, 0] = fd
-                self._flux_density_host[channel, i, 0, 1] = 0.0
-                self._flux_density_host[channel, i, 1, 0] = 0.0
-                self._flux_density_host[channel, i, 1, 1] = fd
-                self._flux_sum_host[channel, 0] += fd
-                self._flux_sum_host[channel, 1] += fd
+                self._flux_models[channel, i] = fd
+        logger.debug('Flux models updated')
+
+    def _update_flux_density(self):
+        """Set the per-channel perceived flux density from the flux models of
+        the sources and a simple beam model.
+
+        This performs an **asynchronous** transfer to the GPU, and the caller
+        must wait for it to complete before calling the function again.
+        """
+        logger.debug('Starting _update_flex_density')
+        self._flux_sum_host.fill(self.sefd)
+        position = self.position or self.phase_center
+
+        # Determine scaling factor for Airy function
+        # 1.029 is the beam width factor for an ideal Airy disk
+        airy_scale = np.pi * self.antennas[0].diameter / katpoint.lightspeed * (1.029 / self.antennas[0].beamwidth)
+        angles = np.empty((len(self.sources),), np.float64)
+        # Find angles between sources and the pointing direction
+        for i, source in enumerate(self.sources):
+            # Evaluate Airy beam model. It uses azel internally, so it needs an antenna.
+            angles[i] = source.separation(position, timestamp=self.time, antenna=self.antennas[0])
+            # There is a pole at 0, so adjust it away if it is zero
+            if abs(angles[i]) < 1e-30:
+                angles[i] = 1e-30
+
+        for channel, freq in enumerate(self.frequencies):
+            x = np.sin(angles) * airy_scale * freq
+            beam = (2 * scipy.special.j1(x) / x)**2
+            fd = self._flux_models[channel, :] * beam
+            self._flux_density_host[channel, :, 0, 0] = fd
+            self._flux_density_host[channel, :, 0, 1] = 0.0
+            self._flux_density_host[channel, :, 1, 0] = 0.0
+            self._flux_density_host[channel, :, 1, 1] = fd
+            fd_sum = fd.sum()
+            self._flux_sum_host[channel, 0] += fd_sum
+            self._flux_sum_host[channel, 1] += fd_sum
         logger.debug('Host flux densities updated')
         self._flux_density.set_async(self.command_queue, self._flux_density_host)
         self._flux_sum.set_async(self.command_queue, self._flux_sum_host)
@@ -257,6 +290,8 @@ class Rime(accel.Operation):
     def _run(self):
         logger.debug('Updating scaled_phase')
         self._update_scaled_phase()
+        logger.debug('Updating perceived flux densities')
+        self._update_flux_density()
         transfer_event = self.command_queue.enqueue_marker()
         logger.debug('Marker enqueued')
 

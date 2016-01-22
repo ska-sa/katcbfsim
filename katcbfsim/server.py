@@ -208,8 +208,23 @@ class SimulatorServer(katcp.DeviceServer):
     @return_reply()
     def request_target(self, sock, target):
         """Set the simulated target, in the format used by katpoint. This also
-        sets the phase center. This can be set while capture is running."""
+        sets the phase center. If no position has been set with `position`, the
+        position also defaults to the target. This can be set while capture is
+        running."""
         self.set_target(katpoint.Target(target))
+        return 'ok',
+
+    def set_position(self, position):
+        self._subarray.position = position
+
+    @request(Str())
+    @return_reply()
+    def request_position(self, sock, position):
+        """Set the simulated position (antenna pointing direction) for the
+        first antenna, in the format used by katpoint. At present it is assumed
+        that all antennas point in the same direction.
+        """
+        self.set_position(katpoint.Target(position))
         return 'ok',
 
     def set_accumulation_length(self, product, period):

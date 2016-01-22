@@ -157,6 +157,7 @@ class Subarray(object):
         self.antennas = []
         self.sources = []
         self.target = None
+        self.position = None
         self._sync_time = katpoint.Timestamp()
         self._gain = 1e-4
         self._clock_ratio = 1.0
@@ -247,6 +248,13 @@ class Subarray(object):
         class this just returns :attr:`target`, but it can be overridden by
         subclasses to allow the target to be pulled rather than pushed."""
         return self.target
+
+    def position_at(self, timestamp):
+        """Obtains the position (pointing direction) at a given point in
+        simulated time. In this base class this just returns :attr:`position`,
+        but it can be overridden by subclasses to allow the target to be pulled
+        rather than pushed."""
+        return self.position
 
 
 class Product(object):
@@ -559,6 +567,7 @@ class FXProduct(CBFProduct):
                 dump_center_time = dump_start_time + 0.5 * self.accumulation_length
                 predict.set_time(dump_center_time)
                 predict.set_phase_center(self.subarray.target_at(dump_start_time))
+                predict.set_position(self.subarray.position_at(dump_start_time))
 
                 # Execute the predictor, updating data
                 logger.debug('Dump %d: waiting for device memory event', index)
