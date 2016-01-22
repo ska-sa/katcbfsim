@@ -5,7 +5,6 @@ import pkg_resources
 import numpy as np
 import katpoint
 import logging
-import math
 import scipy.special
 from katsdpsigproc import accel, tune
 
@@ -204,7 +203,7 @@ class Rime(accel.Operation):
                 angles[i] = 1e-30
 
         for channel, freq in enumerate(self.frequencies):
-            x = math.sin(angles) * airy_scale * freq
+            x = np.sin(angles) * airy_scale * freq
             beam = (2 * scipy.special.j1(x) / x)**2
             fd = self._flux_models[channel, :] * beam
             self._flux_density_host[channel, :, 0, 0] = fd
