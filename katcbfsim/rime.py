@@ -110,7 +110,9 @@ class Rime(accel.Operation):
         self._inv_wavelength = accel.DeviceArray(command_queue.context, (n_channels,), np.float32)
         channel_width = bandwidth / n_channels
         min_frequency = center_frequency - bandwidth / 2
-        self.frequencies = np.arange(0.5, n_channels) * channel_width + min_frequency
+        # Note: min_frequency is the centre of the first bin, not the bottom
+        # end.
+        self.frequencies = np.arange(n_channels) * channel_width + min_frequency
         logging.info("Frequencies %s", self.frequencies)
         inv_wavelength = self._inv_wavelength.empty_like()
         inv_wavelength[:] = (self.frequencies / katpoint.lightspeed).astype(np.float32)
