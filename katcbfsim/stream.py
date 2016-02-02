@@ -26,7 +26,7 @@ class SpeadStream(object):
             raise ValueError('Only exactly one endpoint is currently supported')
         self.endpoint = endpoints[0]
         self.product = product
-        self._flavour = spead2.Flavour(4, 64, 48, spead2.BUG_COMPAT_PYSPEAD_0_5_2)
+        self._flavour = spead2.Flavour(4, 64, 48, 0)
         self._inline_format = [('u', self._flavour.heap_address_bits)]
         # Send at a slightly higher rate, to account for overheads, and so
         # that if the sender sends a burst we can catch up with it.
