@@ -26,7 +26,7 @@ redis
 scipy
 singledispatch
 six
-spead2==0.6.0
+spead2
 tornado
 traceback2
 trollius
