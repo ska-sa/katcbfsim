@@ -21,19 +21,28 @@ class SpeadStream(object):
     def factory(cls, endpoints):
         return functools.partial(cls, endpoints)
 
+    @property
+    def n_streams(self):
+        return len(self._streams)
+
     def __init__(self, endpoints, product, in_rate):
-        if len(endpoints) != 1:
-            raise ValueError('Only exactly one endpoint is currently supported')
-        self.endpoint = endpoints[0]
+        if not endpoints:
+            raise ValueError('At least one endpoint is required')
+        n = len(endpoints)
+        if product.n_channels % n:
+            raise ValueError('Number of channels not divisible by number of streams')
+        self.endpoints = endpoints
         self.product = product
         self._flavour = spead2.Flavour(4, 64, 48, 0)
         self._inline_format = [('u', self._flavour.heap_address_bits)]
         # Send at a slightly higher rate, to account for overheads, and so
         # that if the sender sends a burst we can catch up with it.
-        out_rate = in_rate * 1.05
+        out_rate = in_rate * 1.05 / n
         config = spead2.send.StreamConfig(rate=out_rate, max_packet_size=9172)
-        self._stream = spead2.send.trollius.UdpStream(
-            spead2.ThreadPool(), endpoints[0].host, endpoints[0].port, config)
+        self._streams = [
+            spead2.send.trollius.UdpStream(
+                spead2.ThreadPool(), e.host, e.port, config)
+            for e in endpoints]
 
     @trollius.coroutine
     def close(self):
@@ -41,9 +50,10 @@ class SpeadStream(object):
         # space in the sending buffer. In normal use it won't do anything
         # because we always asynchronously wait for transmission, but in an
         # exception case there might be pending sends.
-        yield From(self._stream.async_flush())
-        heap = self._ig_data.get_end()
-        yield From(self._stream.async_send_heap(heap))
+        for i, stream in enumerate(self._streams):
+            heap = self._ig_data[i].get_end()
+            yield From(stream.async_flush())
+            yield From(stream.async_send_heap(heap))
 
 
 class CBFSpeadStream(SpeadStream):
@@ -66,22 +76,26 @@ class CBFSpeadStream(SpeadStream):
 
     def add_n_chans_item(self, ig):
         ig.add_item(0x1009, 'n_chans', 'The total number of frequency channels present in any integration.',
-            (), format=self._inline_format, value=self.product.n_channels)
+            (), format=self._inline_format, value=self.product.n_channels // self.n_streams)
 
     def add_n_ants_item(self, ig):
         ig.add_item(0x100A, 'n_ants', 'The total number of dual-pol antennas in the system.',
             (), format=self._inline_format, value=self.product.n_antennas)
 
-    def add_center_freq_item(self, ig):
+    def add_center_freq_item(self, ig, stream_idx):
+        # Find per-stream center frequency
+        center_frequency = (
+            self.product.center_frequency
+            + self.product.bandwidth * (2 * stream_idx + 1 - self.n_streams) / (2 * self.n_streams))
         # Convert sky frequency to DBE frequency
         digitised_bandwidth = self.product.adc_rate // 2
         center_frequency = self.product.center_frequency % digitised_bandwidth
         ig.add_item(0x1011, 'center_freq', 'The center frequency of the DBE in Hz, 64-bit IEEE floating-point number.',
-            (), format=[('f', 64)], value=np.float64(self.product.center_frequency))
+            (), format=[('f', 64)], value=np.float64(center_frequency))
 
     def add_bandwidth_item(self, ig):
         ig.add_item(0x1013, 'bandwidth', 'The analogue bandwidth of the digitally processed signal in Hz.',
-            (), format=[('f', 64)], value=np.float64(self.product.bandwidth))
+            (), format=[('f', 64)], value=np.float64(self.product.bandwidth / self.n_streams))
 
     def add_fft_shift_item(self, ig):
         ig.add_item(0x101E, 'fft_shift', 'The FFT bitshift pattern. F-engine correlator internals.',
@@ -95,12 +109,12 @@ class CBFSpeadStream(SpeadStream):
         ig.add_item(0x1020, 'requant_bits', 'Number of bits per sample after requantisation. For FX correlators, this represents the number of bits after requantisation in the F engines (post FFT and any phasing stages) and is the actual number of bits used in X-engine processing. For time-domain systems, this is requantisation in the time domain before any subsequent processing.',
             (), format=self._inline_format, value=self.requant_bits)
 
-    def add_rx_udp_items(self, ig):
+    def add_rx_udp_items(self, ig, stream_idx):
         ig.add_item(0x1022, 'rx_udp_port', 'Destination UDP port for data output.',
-            (), format=self._inline_format, value=self.endpoint.port)
+            (), format=self._inline_format, value=self.endpoints[stream_idx].port)
         # TODO: this might need to be translated from hostname to IP address
         ig.add_item(0x1024, 'rx_udp_ip_str', 'Destination IP address for output UDP packets.',
-            (None,), format=[('c', 8)], value=self.endpoint.host)
+            (None,), format=[('c', 8)], value=self.endpoints[stream_idx].host)
 
     def add_sync_time_item(self, ig):
         ig.add_item(0x1027, 'sync_time', 'Time at which the system was last synchronised (armed and triggered by a 1PPS) in seconds since the Unix Epoch.',
@@ -116,7 +130,7 @@ class CBFSpeadStream(SpeadStream):
             (), format=[('f', 64)], value=self.scale_factor_timestamp)
 
     def add_eq_coef_items(self, ig):
-        initial_gain = np.zeros((self.product.n_channels, 2), np.uint32)
+        initial_gain = np.zeros((self.product.n_channels // self.n_streams, 2), np.uint32)
         initial_gain[:, 0].fill(200)    # Arbitrary value for now (200 + 0j)
         input_number = 0
         for antenna in self.product.subarray.antennas:
@@ -148,12 +162,12 @@ class FXStreamSpead(CBFSpeadStream):
         in_rate = product.n_baselines * product.n_channels * 4 * 8 / \
             product.accumulation_length
         super(FXStreamSpead, self).__init__(endpoints, product, in_rate)
-        self._ig_static = self._make_ig_static()
+        self._ig_static = [self._make_ig_static(i) for i in range(self.n_streams)]
         self._ig_gain = self._make_ig_gain()
         self._ig_labels = self._make_ig_labels()
-        self._ig_data = self._make_ig_data()
+        self._ig_data = [self._make_ig_data() for i in range(self.n_streams)]
 
-    def _make_ig_static(self):
+    def _make_ig_static(self, stream_idx):
         ig = spead2.send.ItemGroup(flavour=self._flavour)
         self.add_adc_sample_rate_item(ig)
         ig.add_item(0x1008, 'n_bls', 'The total number of baselines in the data product. Each pair of inputs (polarisation pairs) is considered a baseline.',
@@ -162,7 +176,7 @@ class FXStreamSpead(CBFSpeadStream):
         self.add_n_ants_item(ig)
         ig.add_item(0x100B, 'n_xengs', 'The total number of X engines in a correlator system.',
             (), format=self._inline_format, value=1)
-        self.add_center_freq_item(ig)
+        self.add_center_freq_item(ig, stream_idx)
         self.add_bandwidth_item(ig)
         ig.add_item(0x1015, 'n_accs', 'The number of spectra that are accumulated per integration.',
             (), format=self._inline_format, value=self.product.n_accs)
@@ -171,7 +185,7 @@ class FXStreamSpead(CBFSpeadStream):
         self.add_fft_shift_item(ig)
         self.add_xeng_acc_len_item(ig)
         self.add_requant_bits_item(ig)
-        self.add_rx_udp_items(ig)
+        self.add_rx_udp_items(ig, stream_idx)
         self.add_sync_time_item(ig)
         self.add_adc_bits_item(ig)
         self.add_scale_factor_timestamp_item(ig)
@@ -212,32 +226,50 @@ class FXStreamSpead(CBFSpeadStream):
         self.add_timestamp_item(ig)
         # flags_xeng_raw is still TBD in the ICD, so omitted for now
         ig.add_item(0x1800, 'xeng_raw', 'Raw data stream from all the X-engines in the system. For KAT-7, this item represents a full spectrum (all frequency channels) assembled from lowest frequency to highest frequency. Each frequency channel contains the data for all baselines (n_bls given by SPEAD Id=0x1008). Each value is a complex number - two (real and imaginary) signed integers.',
-            (self.product.n_channels, self.product.n_baselines * 4, 2), np.int32)
+            (self.product.n_channels // self.n_streams, self.product.n_baselines * 4, 2), np.int32)
         return ig
 
     @trollius.coroutine
-    def send_metadata(self):
-        """Reissue all the metadata on the stream."""
-        heap = self._ig_static.get_heap(descriptors='all', data='all')
-        yield From(self._stream.async_send_heap(heap))
+    def _send_metadata_stream(self, stream_idx):
+        stream = self._streams[stream_idx]
+        heap = self._ig_static[stream_idx].get_heap(descriptors='all', data='all')
+        yield From(stream.async_send_heap(heap))
         heap = self._ig_gain.get_heap(descriptors='all', data='all')
-        yield From(self._stream.async_send_heap(heap))
+        yield From(stream.async_send_heap(heap))
         heap = self._ig_labels.get_heap(descriptors='all', data='all')
-        yield From(self._stream.async_send_heap(heap))
-        heap = self._ig_data.get_heap(descriptors='all', data='none')
-        yield From(self._stream.async_send_heap(heap))
+        yield From(stream.async_send_heap(heap))
+        heap = self._ig_data[stream_idx].get_heap(descriptors='all', data='none')
+        yield From(stream.async_send_heap(heap))
+
+    @trollius.coroutine
+    def send_metadata(self):
+        """Reissue all the metadata on the streams."""
+        futures = []
+        # Send on all streams in parallel
+        for i in range(self.n_streams):
+            futures.append(trollius.async(self._send_metadata_stream(i)))
+        for future in futures:
+            yield From(future)
 
     @trollius.coroutine
     def send(self, vis, dump_index):
         assert vis.flags.c_contiguous, 'Visibility array must be contiguous'
-        vis_view = vis.reshape(self._ig_data['xeng_raw'].shape)
-        self._ig_data['xeng_raw'].value = vis_view
+        shape = (self.product.n_channels, self.product.n_baselines * 4, 2)
+        stream_channels = self.product.n_channels // self.n_streams
+        vis_view = vis.reshape(self.product.n_channels, self.product.n_baselines * 4, 2)
+        futures = []
         timestamp = dump_index * self.product.n_accs * self.product.n_channels * self.scale_factor_timestamp // self.product.bandwidth
         # Truncate timestamp to the width of the field it is in
         timestamp = timestamp & ((1 << self._flavour.heap_address_bits) - 1)
-        self._ig_data['timestamp'].value = timestamp
-        heap = self._ig_data.get_heap()
-        yield From(self._stream.async_send_heap(heap))
+        for i, stream in enumerate(self._streams):
+            channel0 = stream_channels * i
+            channel1 = channel0 + stream_channels
+            self._ig_data[i]['xeng_raw'].value = vis_view[channel0:channel1]
+            self._ig_data[i]['timestamp'].value = timestamp
+            heap = self._ig_data[i].get_heap()
+            futures.append(trollius.async(stream.async_send_heap(heap)))
+        for future in futures:
+            yield From(future)
 
 
 class FileStream(object):
@@ -287,20 +319,20 @@ class BeamformerStreamSpead(CBFSpeadStream):
             in_rate = product.n_channels * product.timesteps * 2 * product.sample_bits / product.wall_interval / 8
         super(BeamformerStreamSpead, self).__init__(endpoints, product, in_rate)
         self.xeng_acc_len = self.product.timesteps
-        self._ig_static = self._make_ig_static()
+        self._ig_static = [self._make_ig_static(i) for i in range(self.n_streams)]
         self._ig_weights = self._make_ig_weights()
         self._ig_labels = self._make_ig_labels()
         self._ig_timing = self._make_ig_timing()
-        self._ig_data = self._make_ig_data()
+        self._ig_data = [self._make_ig_data() for i in range(self.n_streams)]
 
-    def _make_ig_static(self):
+    def _make_ig_static(self, stream_idx):
         ig = spead2.send.ItemGroup(flavour=self._flavour)
         self.add_adc_sample_rate_item(ig)
         self.add_n_chans_item(ig)
         self.add_n_ants_item(ig)
         ig.add_item(0x100F, 'n_bengs', 'The total number of B engines in a beamformer system.',
             (), format=self._inline_format, value=1)
-        self.add_center_freq_item(ig)
+        self.add_center_freq_item(ig, stream_idx)
         self.add_bandwidth_item(ig)
         self.add_xeng_acc_len_item(ig)
         self.add_requant_bits_item(ig)
@@ -312,7 +344,7 @@ class BeamformerStreamSpead(CBFSpeadStream):
         # ig.add_item(0x1043, 'ddc_mix_freq', 'Digital downconverter mixing frequency as a fraction of the ADC sampling frequency. eg: 0.25. Set to zero if no DDC is present.',
         #     (), format=[('f', 64)], value=0.0)
         self.add_adc_bits_item(ig)
-        self.add_rx_udp_items(ig)
+        self.add_rx_udp_items(ig, stream_idx)
         ig.add_item(0x1050, 'beng_out_bits_per_sample', 'The number of bits per value of the beng accumulator output. Note this is for a single component value, not the combined complex size.',
             (), format=self._inline_format, value=self.product.sample_bits)
         return ig
@@ -343,29 +375,47 @@ class BeamformerStreamSpead(CBFSpeadStream):
         # useless anyway.
         # bf_raw is not in v3 of the ICD, but this is according to MKAT-ECP-157
         ig.add_item(0x5000, 'bf_raw', 'Beamformer output for frequency-domain beam. User-defined name (out of band control). Record length depending on number of frequency channels and F-X packet size (xeng_acc_len).',
-            shape=(self.product.n_channels, self.product.timesteps, 2), dtype=self.product.dtype)
+            shape=(self.product.n_channels // self.n_streams, self.product.timesteps, 2), dtype=self.product.dtype)
         return ig
 
     @trollius.coroutine
-    def send_metadata(self):
+    def _send_metadata_stream(self, stream_idx):
         """Reissue all the metadata on the stream."""
+        stream = self._streams[stream_idx]
         heap = self._ig_timing.get_heap(descriptors='all', data='all')
-        yield From(self._stream.async_send_heap(heap))
+        yield From(stream.async_send_heap(heap))
         heap = self._ig_weights.get_heap(descriptors='all', data='all')
-        yield From(self._stream.async_send_heap(heap))
-        heap = self._ig_static.get_heap(descriptors='all', data='all')
-        yield From(self._stream.async_send_heap(heap))
+        yield From(stream.async_send_heap(heap))
+        heap = self._ig_static[stream_idx].get_heap(descriptors='all', data='all')
+        yield From(stream.async_send_heap(heap))
         heap = self._ig_labels.get_heap(descriptors='all', data='all')
-        yield From(self._stream.async_send_heap(heap))
-        heap = self._ig_data.get_heap(descriptors='all', data='none')
-        yield From(self._stream.async_send_heap(heap))
+        yield From(stream.async_send_heap(heap))
+        heap = self._ig_data[stream_idx].get_heap(descriptors='all', data='none')
+        yield From(stream.async_send_heap(heap))
+
+    @trollius.coroutine
+    def send_metadata(self):
+        """Reissue all the metadata on the streams."""
+        futures = []
+        # Send on all streams in parallel
+        for i in range(self.n_streams):
+            futures.append(trollius.async(self._send_metadata_stream(i)))
+        for future in futures:
+            yield From(future)
 
     @trollius.coroutine
     def send(self, beam_data, index):
-        self._ig_data['bf_raw'].value = beam_data
+        stream_channels = self.product.n_channels // self.n_streams
         timestamp = index * self.product.timesteps * self.product.n_channels * self.scale_factor_timestamp // self.product.bandwidth
         # Truncate timestamp to the width of the field it is in
         timestamp = timestamp & ((1 << self._flavour.heap_address_bits) - 1)
-        self._ig_data['timestamp'].value = timestamp
-        heap = self._ig_data.get_heap()
-        yield From(self._stream.async_send_heap(heap))
+        futures = []
+        for i, stream in enumerate(self._streams):
+            channel0 = stream_channels * i
+            channel1 = channel0 + stream_channels
+            self._ig_data[i]['bf_raw'].value = beam_data[channel0:channel1]
+            self._ig_data[i]['timestamp'].value = timestamp
+            heap = self._ig_data[i].get_heap()
+            futures.append(stream.async_send_heap(heap))
+        for future in futures:
+            yield From(future)
