@@ -10,7 +10,7 @@ import re
 from tornado.gen import Return
 from tornado.platform.asyncio import AsyncIOMainLoop
 from katsdpsigproc import accel
-from katsdpsigproc.test.test_accel import device_test, force_autotune
+from katsdpsigproc.test.test_accel import device_test, cuda_test, force_autotune
 from katcbfsim import server, product, stream
 from nose.tools import *
 
@@ -166,12 +166,14 @@ class TestSimulationServer(object):
         assert_greater_equal(_current_stream.dumps, min_dumps)
         assert_true(_current_stream.closed)
 
+    @cuda_test
     @async_test
     @tornado.gen.coroutine
     def test_fx_capture(self):
         """Create an FX product, start it, and stop it again"""
         yield self._test_fx_capture()
 
+    @cuda_test
     @async_test
     @tornado.gen.coroutine
     def test_fx_capture_fast(self):
