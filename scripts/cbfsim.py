@@ -85,17 +85,16 @@ def prepare_server(server, args):
         server.set_target(katpoint.Target(args.cbf_target))
     if args.create_fx_product is not None:
         product = server.add_fx_product(args.create_fx_product,
-            args.cbf_adc_sample_rate, args.cbf_bandwidth, args.cbf_channels)
+            args.cbf_adc_sample_rate, arg.center_frequency, args.cbf_bandwidth,
+            args.cbf_channels)
         server.set_accumulation_length(product, args.cbf_int_time)
-        server.set_center_frequency(product, args.cbf_center_freq)
         server.set_destination(product, [args.cbf_spead])
         if args.start:
             server.capture_start(product)
     if args.create_beamformer_product is not None:
         product = server.add_beamformer_product(args.create_beamformer_product,
-            args.cbf_adc_sample_rate, args.cbf_bandwidth, args.cbf_channels,
-            args.beamformer_timesteps, args.beamformer_bits)
-        server.set_center_frequency(product, args.cbf_center_freq)
+            args.cbf_adc_sample_rate, arg.center_fequency, args.cbf_bandwidth,
+            args.cbf_channels, args.beamformer_timesteps, args.beamformer_bits)
         server.set_destination(product, [args.cbf_spead])
         if args.start:
             server.capture_start(product)
@@ -110,7 +109,7 @@ def main():
     parser.add_argument('--cbf-channels', type=int, default=32768, metavar='N', help='Number of channels [%(default)s]')
     parser.add_argument('--cbf-adc-sample-rate', type=int, default=1712000000, metavar='HZ', help='ADC rate [%(default)s]'),
     parser.add_argument('--cbf-bandwidth', type=int, default=856000000, metavar='HZ', help='Bandwidth [%(default)s]')
-    parser.add_argument('--cbf-center-freq', type=int, default=1284000000, metavar='HZ', help='Center frequency [%(default)s]')
+    parser.add_argument('--cbf-center-freq', type=int, default=1284000000, metavar='HZ', help='Sky center frequency [%(default)s]')
     parser.add_argument('--cbf-spead', type=katsdptelstate.endpoint.endpoint_parser(7148), metavar='ENDPOINT', default='127.0.0.1:7148', help='destination for CBF output [%(default)s]')
     parser.add_argument('--cbf-sync-time', type=int, metavar='TIME', help='Sync time as UNIX timestamp [now]')
     parser.add_argument('--cbf-int-time', type=float, metavar='TIME', default=0.5, help='Integration time in seconds [%(default)s]')
