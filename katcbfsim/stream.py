@@ -73,6 +73,9 @@ class CBFSpeadStream(SpeadStream):
             (), format=self._inline_format, value=self.product.n_antennas)
 
     def add_center_freq_item(self, ig):
+        # Convert sky frequency to DBE frequency
+        digitised_bandwidth = self.product.adc_rate // 2
+        center_frequency = self.product.center_frequency % digitised_bandwidth
         ig.add_item(0x1011, 'center_freq', 'The center frequency of the DBE in Hz, 64-bit IEEE floating-point number.',
             (), format=[('f', 64)], value=np.float64(self.product.center_frequency))
 
