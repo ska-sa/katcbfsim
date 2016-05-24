@@ -2,7 +2,7 @@
 
 from __future__ import print_function, division
 from katsdpsigproc import accel
-from katsdpsigproc.test.test_accel import device_test, force_autotune
+from katsdpsigproc.test.test_accel import device_test, cuda_test, force_autotune
 from katcbfsim import rime
 from nose.tools import *
 import katpoint
@@ -56,6 +56,7 @@ class TestRime(object):
     """Tests for :class:`katcbfsim.rime.Rime`."""
 
     @device_test
+    @cuda_test
     def test_sample_stats(self, context, queue):
         """Run a dumb CPU simulation for a small array, and check that the
         statistics are the same as the GPU simulation. For simplicity, we
@@ -181,6 +182,7 @@ class TestRime(object):
                     baseline_index += 1
 
     @device_test
+    @cuda_test
     @force_autotune
     def test_autotune(self, context, queue):
         """Test that autotuner runs successfully"""
