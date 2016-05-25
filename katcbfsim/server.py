@@ -358,16 +358,8 @@ class SimulatorServer(katcp.DeviceServer):
         return 'ok',
 
     def configure_product_from_telstate(self, product, telstate=None):
-        if telstate is None:
-            telstate = self._telstate
-        if isinstance(product, FXProduct):
-            # Set accumulation length
-            try:
-                accumulation_length = 1.0 / telstate['sub_dump_rate']
-            except KeyError:
-                logger.warn('sub_dump_rate not found for %s, accumulation-length not set', product.name)
-            else:
-                self.set_accumulation_length(product, accumulation_length)
+        # This function kept only for backwards compatibility.
+        pass
 
     @request(Str())
     @return_reply()
