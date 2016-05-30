@@ -234,8 +234,7 @@ class Rime(accel.Operation):
         ra, dec = zip(*[source.radec(self.time, ref_antenna) for source in self.sources])
         ra = np.array(ra)
         dec = np.array(dec)
-        l, m = self.phase_center.sphere_to_plane(ra, dec, self.time, ref_antenna, 'SIN', 'radec')
-        n = np.sqrt(1 - l**2 - m**2)
+        l, m, n = self.phase_center.lmn(ra, dec, self.time, ref_antenna)
         self._scaled_phase_host[:] = -2 * (np.outer(l, u) + np.outer(m, v) + np.outer(n - 1, w))
         self._scaled_phase.set_async(self.command_queue, self._scaled_phase_host)
 
