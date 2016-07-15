@@ -105,23 +105,40 @@ class SimulatorServer(katcp.DeviceServer):
         self._add_product(product)
         return product
 
-    @request(Str(), Int(), Int(), Int())
+    @request(Str(), Int(), Int(), Int(), Int())
     @return_reply()
-    def request_product_create_correlator(self, sock, name, adc_rate, bandwidth, n_channels):
-        """Create a new simulated correlator product"""
+    def request_product_create_correlator(
+            self, sock, name, adc_rate, center_frequency, bandwidth, n_channels):
+        """Create a new simulated correlator product
+
+        Parameters
+        ----------
+        name : str
+            Name for the new product (must be unique)
+        adc_rate : int
+            Simulated ADC clock rate, in Hz
+        center_frequency : int
+            Sky frequency of the center of the band, in Hz
+        bandwidth : int
+            Bandwidth of all channels in the product, in Hz
+        n_channels : int
+            Number of channels in the product
+        """
         if name in self._products:
             return 'fail', 'product {} already exists'.format(name)
-        self.add_fx_product(name, adc_rate, bandwidth, n_channels)
+        self.add_fx_product(name, adc_rate, center_frequency, bandwidth, n_channels)
         return 'ok',
 
-    @request(Str(), Int(), Int(), Int(), Int(), Int())
+    @request(Str(), Int(), Int(), Int(), Int(), Int(), Int())
     @return_reply()
     def request_product_create_beamformer(
-            self, sock, name, adc_rate, bandwidth, n_channels, timesteps, sample_bits):
+            self, sock, name, adc_rate, center_frequency, bandwidth, n_channels,
+            timesteps, sample_bits):
         """Create a new simulated beamformer product"""
         if name in self._products:
             return 'fail', 'product {} already exists'.format(name)
-        self.add_beamformer_product(name, adc_rate, bandwidth, n_channels, timesteps, sample_bits)
+        self.add_beamformer_product(name, adc_rate, center_frequency, bandwidth,
+                                    n_channels, timesteps, sample_bits)
         return 'ok',
 
     def set_destination(self, product, endpoints):
@@ -341,16 +358,8 @@ class SimulatorServer(katcp.DeviceServer):
         return 'ok',
 
     def configure_product_from_telstate(self, product, telstate=None):
-        if telstate is None:
-            telstate = self._telstate
-        if isinstance(product, FXProduct):
-            # Set accumulation length
-            try:
-                accumulation_length = 1.0 / telstate['sub_dump_rate']
-            except KeyError:
-                logger.warn('sub_dump_rate not found for %s, accumulation-length not set', product.name)
-            else:
-                self.set_accumulation_length(product, accumulation_length)
+        # This function kept only for backwards compatibility.
+        pass
 
     @request(Str())
     @return_reply()

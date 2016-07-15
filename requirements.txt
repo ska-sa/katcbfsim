@@ -15,6 +15,7 @@ netifaces
 nose
 numpy
 pbr
+pkginfo
 ply
 ProxyTypes
 py

@@ -10,7 +10,7 @@ import re
 from tornado.gen import Return
 from tornado.platform.asyncio import AsyncIOMainLoop
 from katsdpsigproc import accel
-from katsdpsigproc.test.test_accel import device_test, force_autotune
+from katsdpsigproc.test.test_accel import device_test, cuda_test, force_autotune
 from katcbfsim import server, product, stream
 from nose.tools import *
 
@@ -153,7 +153,7 @@ class TestSimulationServer(object):
             min_dumps = 5    # Should be enough to demonstrate overlapping I/O
         yield self._configure_subarray()
         # Number of channels is kept small to avoid using too much memory
-        yield self.make_request('product-create-correlator', 'cross', 1712000000, 856000000, 4096)
+        yield self.make_request('product-create-correlator', 'cross', 1712000000, 1284000000, 856000000, 4096)
         yield self.make_request('capture-destination', 'cross', 'localhost:7148')
         yield self.make_request('accumulation-length', 'cross', 0.5)
         yield self.make_request('frequency-select', 'cross', 1284000000)
@@ -166,12 +166,14 @@ class TestSimulationServer(object):
         assert_greater_equal(_current_stream.dumps, min_dumps)
         assert_true(_current_stream.closed)
 
+    @cuda_test
     @async_test
     @tornado.gen.coroutine
     def test_fx_capture(self):
         """Create an FX product, start it, and stop it again"""
         yield self._test_fx_capture()
 
+    @cuda_test
     @async_test
     @tornado.gen.coroutine
     def test_fx_capture_fast(self):
@@ -184,9 +186,8 @@ class TestSimulationServer(object):
             min_dumps = 5    # Should be enough to demonstrate overlapping I/O
         yield self._configure_subarray()
         # Use lower bandwidth to reduce test time
-        yield self.make_request('product-create-beamformer', 'beam1', 1712000000, 856000000 / 4, 32768, 256, 8)
+        yield self.make_request('product-create-beamformer', 'beam1', 1712000000, 1284000000, 856000000 / 4, 32768, 256, 8)
         yield self.make_request('capture-destination', 'beam1', 'localhost:7149')
-        yield self.make_request('frequency-select', 'beam1', 1284000000)
         yield self.make_request('capture-start', 'beam1')
         for i in range(min_dumps):
             yield _current_stream.dumps_semaphore.acquire()
@@ -225,7 +226,7 @@ class TestSimulationServer(object):
         a capture is in progress."""
         yield self._configure_subarray()
         # Use lower bandwidth to reduce test time
-        yield self.make_request('product-create-beamformer', 'beam1', 1712000000, 856000000 / 4, 32768, 256, 8)
+        yield self.make_request('product-create-beamformer', 'beam1', 1712000000, 1284000000, 856000000 / 4, 32768, 256, 8)
         yield self.make_request('capture-destination', 'beam1', 'localhost:7149')
         yield self.make_request('capture-start', 'beam1')
         yield self.assert_request_fails('^cannot add antennas while capture is in progress$', 'antenna-add', 'm062, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -1440.69968823 -2269.26759132 6.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22')

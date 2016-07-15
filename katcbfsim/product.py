@@ -402,10 +402,12 @@ class CBFProduct(Product):
         Name for this product (used by katcp)
     adc_rate : int
         Simulated ADC clock rate, in Hz
+    center_frequency : int
+        Sky frequency of the center of the band, in Hz
     bandwidth : int
-        Total bandwidth over all channels, in Hz
+        Bandwidth of all channels in the product, in Hz
     n_channels : int
-        Number of channels
+        Number of channels in the product
     loop : :class:`trollius.BaseEventLoop`, optional
         Event loop for coroutines
 
@@ -413,19 +415,20 @@ class CBFProduct(Product):
     ----------
     adc_rate : int
         Simulated ADC clock rate, in Hz
-    bandwidth : int
-        Total bandwidth over all channels, in Hz
-    n_channels : int
-        Number of channels
     center_frequency : int
-        Frequency of the center of the band, in Hz
+        Sky frequency of the center of the band, in Hz
+    bandwidth : int
+        Bandwidth of all channels in the product, in Hz
+    n_channels : int
+        Number of channels in the product
     """
-    def __init__(self, subarray, name, adc_rate, bandwidth, n_channels, loop=None):
+    def __init__(self, subarray, name, adc_rate, center_frequency, bandwidth,
+                 n_channels, loop=None):
         super(CBFProduct, self).__init__(subarray, name, loop)
         self.adc_rate = adc_rate
+        self.center_frequency = center_frequency
         self.bandwidth = bandwidth
         self.n_channels = n_channels
-        self.center_frequency = 1284000000
 
 
 class FXProduct(CBFProduct):
@@ -441,10 +444,12 @@ class FXProduct(CBFProduct):
         Name for this product (used by katcp)
     adc_rate : int
         Simulated ADC clock rate, in Hz
+    center_frequency : int
+        Sky frequency of the center of the band, in Hz
     bandwidth : int
-        Total bandwidth over all channels, in Hz
+        Bandwidth of all channels in the product, in Hz
     n_channels : int
-        Number of channels
+        Number of channels in the product
     loop : :class:`trollius.BaseEventLoop`, optional
         Event loop for coroutines
 
@@ -462,8 +467,10 @@ class FXProduct(CBFProduct):
         Number of simulated accumulations per output dump. This is set
         indirectly by writing to :attr:`accumulation_length`.
     """
-    def __init__(self, context, subarray, name, adc_rate, bandwidth, n_channels, loop=None):
-        super(FXProduct, self).__init__(subarray, name, adc_rate, bandwidth, n_channels, loop)
+    def __init__(self, context, subarray, name, adc_rate,
+                 center_frequency, bandwidth, n_channels, loop=None):
+        super(FXProduct, self).__init__(subarray, name, adc_rate, center_frequency, bandwidth,
+                                        n_channels, loop)
         self.context = context
         self.accumulation_length = 0.5
         self.sefd = 400.0   # Jansky
@@ -681,10 +688,12 @@ class BeamformerProduct(CBFProduct):
         Name for this product (used by katcp)
     adc_rate : int
         Simulated ADC clock rate, in Hz
+    center_frequency : int
+        Sky frequency of the center of the band, in Hz
     bandwidth : int
-        Total bandwidth over all channels, in Hz
+        Bandwidth of all channels in the product, in Hz
     n_channels : int
-        Number of channels
+        Number of channels in the product
     timesteps : int
         Number of samples in time accumulated into a single update. This is
         used by :class:`BeamformerStreamSpead` to decide the data shape.
@@ -709,8 +718,10 @@ class BeamformerProduct(CBFProduct):
     wall_interval : float
         Equivalent to :attr:`interval`, but in wall-clock time
     """
-    def __init__(self, subarray, name, adc_rate, bandwidth, n_channels, timesteps, sample_bits, loop=None):
-        super(BeamformerProduct, self).__init__(subarray, name, adc_rate, bandwidth, n_channels, loop)
+    def __init__(self, subarray, name, adc_rate, center_frequency, bandwidth,
+                 n_channels, timesteps, sample_bits, loop=None):
+        super(BeamformerProduct, self).__init__(
+                subarray, name, adc_rate, center_frequency, bandwidth, n_channels, loop)
         self.timesteps = timesteps
         self.sample_bits = sample_bits
         if sample_bits == 8:
