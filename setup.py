@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-from setuptools import setup
+from setuptools import setup, find_packages
 
 tests_require=['nose', 'scipy', 'mock']
 
@@ -17,6 +17,6 @@ setup(
         'katsdpsigproc[CUDA]', 'katsdptelstate'],
     tests_require=tests_require,
     extras_require={'test': tests_require, 'doc': ['sphinx>=1.3']},
-    packages=['katcbfsim'],
+    packages=find_packages(),
     use_katversion=True
 )
