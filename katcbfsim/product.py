@@ -4,7 +4,7 @@ import logging
 import collections
 from trollius import From, Return
 from katsdptelstate import endpoint
-from katsdpsigproc import accel
+from katsdpsigproc import accel, resource
 import katpoint
 import numpy as np
 import math
@@ -31,96 +31,6 @@ class IncompleteConfigError(RuntimeError):
 class UnsupportedProductError(RuntimeError):
     """Exception thrown for operations not supported on this product type."""
     pass
-
-
-@trollius.coroutine
-def wait_until(future, when, loop=None):
-    """Like :meth:`trollius.wait_for`, but with an absolute timeout."""
-    def ready(*args):
-        if not waiter.done():
-            waiter.set_result(None)
-
-    if loop is None:
-        loop = trollius.get_event_loop()
-    waiter = trollius.Future(loop=loop)
-    timeout_handle = loop.call_at(when, ready)
-    # Ensure the that future is really a future, not a coroutine object
-    future = trollius.async(future, loop=loop)
-    future.add_done_callback(ready)
-    try:
-        result = yield From(waiter)
-        if future.done():
-            raise trollius.Return(future.result())
-        else:
-            future.remove_done_callback(ready)
-            future.cancel()
-            raise trollius.TimeoutError()
-    finally:
-        timeout_handle.cancel()
-
-
-@trollius.coroutine
-def _async_wait_for_events(events, loop=None):
-    def wait_for_events(events):
-        for event in events:
-            event.wait()
-    if loop is None:
-        loop = trollius.get_event_loop()
-    if events:
-        yield From(loop.run_in_executor(None, wait_for_events, events))
-
-
-class ResourceAllocation(object):
-    def __init__(self, start, end, value):
-        self._start = start
-        self._end = end
-        self.value = value
-
-    def wait(self):
-        return self._start
-
-    @trollius.coroutine
-    def wait_events(self, loop=None):
-        if loop is None:
-            loop = trollius.get_event_loop()
-        events = yield From(self._start)
-        yield From(_async_wait_for_events(events, loop=loop))
-
-    def ready(self, events=None):
-        if events is None:
-            events = []
-        self._end.set_result(events)
-
-    def __enter__(self):
-        return self.value
-
-    def __exit__(self, exc_type, exc_value, exc_tb):
-        if not self._end.done():
-            if exc_type is not None:
-                self._end.cancel()
-            else:
-                logger.warn('Resource allocation was not explicitly made ready')
-                self.ready()
-
-
-class Resource(object):
-    """Abstraction of a contended resource, which may exist on a device.
-
-    Passing of ownership is done via futures. Acquiring a resource is a
-    non-blocking operation that returns two futures: a future to wait for
-    before use, and a future to be signalled with a result when done. The
-    value of each of these futures is a (possibly empty) list of device
-    events which must be waited on before more device work is scheduled.
-    """
-    def __init__(self, value):
-        self._future = trollius.Future()
-        self._future.set_result([])
-        self.value = value
-
-    def acquire(self):
-        old = self._future
-        self._future = trollius.Future()
-        return ResourceAllocation(old, self._future, self.value)
 
 
 class Subarray(object):
@@ -381,7 +291,7 @@ class Product(object):
                 logger.warn('Falling behind the requested rate by %f seconds', now - wall_time)
             else:
                 logger.debug('Sleeping for %f seconds', wall_time - now)
-            yield From(wait_until(trollius.shield(self._stop_future), wall_time, self._loop))
+            yield From(resource.wait_until(trollius.shield(self._stop_future), wall_time, self._loop))
         except trollius.TimeoutError:
             # This is the normal case: time for the next dump to be transmitted
             stopped = False
@@ -558,8 +468,9 @@ class FXProduct(CBFProduct):
     @trollius.coroutine
     def _run_dump(self, index, predict_a, data_a, host_a, stream_a, io_queue_a):
         """Coroutine that does all the processing for a single dump. More than
-        one of these will be active at a time, and they use :class:`Resource`
-        avoid data hazards and to prevent out-of-order execution.
+        one of these will be active at a time, and they use
+        :class:`katsdpsigproc.resource.Resource` to avoid data hazards and to
+        prevent out-of-order execution.
         """
         try:
             with predict_a as predict, data_a as data, host_a as host, \
@@ -601,7 +512,7 @@ class FXProduct(CBFProduct):
                 data_a.ready([transfer_event])
                 io_queue_a.ready()
                 # Wait for the transfer to complete
-                yield From(_async_wait_for_events([transfer_event], loop=self._loop))
+                yield From(resource.async_wait_for_events([transfer_event], loop=self._loop))
                 logger.debug('Dump %d: transfer to host complete, waiting for stream', index)
 
                 # Send the data
@@ -627,11 +538,11 @@ class FXProduct(CBFProduct):
             yield From(destination.send_metadata())
             predict, data, host = yield From(self._loop.run_in_executor(None, self._make_predict))
             index = 0
-            predict_r = Resource(predict)
-            io_queue_r = Resource(self.context.create_command_queue())
-            data_r = [Resource(x) for x in data]
-            host_r = [Resource(x) for x in host]
-            stream_r = Resource(destination)
+            predict_r = resource.Resource(predict, loop=self._loop)
+            io_queue_r = resource.Resource(self.context.create_command_queue(), loop=self._loop)
+            data_r = [resource.Resource(x, loop=self._loop) for x in data]
+            host_r = [resource.Resource(x, loop=self._loop) for x in host]
+            stream_r = resource.Resource(destination, loop=self._loop)
             wall_time = self._loop.time()
             while True:
                 predict_a = predict_r.acquire()
@@ -644,7 +555,7 @@ class FXProduct(CBFProduct):
                 # we will block here rather than building an ever-growing set
                 # of active coroutines.
                 logger.debug('Dump %d: waiting for predictor', index)
-                yield From(predict_a.wait_events(self._loop))
+                yield From(predict_a.wait_events())
                 logger.debug('Dump %d: predictor ready', index)
                 future = trollius.async(
                     self._run_dump(index, predict_a, data_a, host_a, stream_a, io_queue_a),
