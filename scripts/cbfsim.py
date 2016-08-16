@@ -88,14 +88,14 @@ def prepare_server(server, args):
             args.cbf_adc_sample_rate, args.cbf_center_freq, args.cbf_bandwidth,
             args.cbf_channels)
         server.set_accumulation_length(product, args.cbf_int_time)
-        server.set_destination(product, args.cbf_spead)
+        server.set_destination(product, args.cbf_spead, args.cbf_streams)
         if args.start:
             server.capture_start(product)
     if args.create_beamformer_product is not None:
         product = server.add_beamformer_product(args.create_beamformer_product,
             args.cbf_adc_sample_rate, args.cbf_center_freq, args.cbf_bandwidth,
             args.cbf_channels, args.beamformer_timesteps, args.beamformer_bits)
-        server.set_destination(product, args.cbf_spead)
+        server.set_destination(product, args.cbf_spead, args.cbf_streams)
         if args.start:
             server.capture_start(product)
 
@@ -113,6 +113,7 @@ def main():
     parser.add_argument('--cbf-spead', type=katsdptelstate.endpoint.endpoint_list_parser(7148), metavar='ENDPOINT', default='127.0.0.1:7148', help='destination for CBF output [%(default)s]')
     parser.add_argument('--cbf-sync-time', type=int, metavar='TIME', help='Sync time as UNIX timestamp [now]')
     parser.add_argument('--cbf-int-time', type=float, metavar='TIME', default=0.5, help='Integration time in seconds [%(default)s]')
+    parser.add_argument('--cbf-streams', type=int, metavar='N', help='Number of streams (X/B-engines) in simulated CBF [auto]')
     parser.add_argument('--cbf-antenna', dest='cbf_antennas', type=parse_antenna, action='append', default=[], metavar='DESCRIPTION', help='Specify an antenna (can be used multiple times)')
     parser.add_argument('--cbf-antenna-file', metavar='FILE', help='Load antenna descriptions from file, one per line')
     parser.add_argument('--cbf-sim-source', dest='cbf_sim_sources', type=parse_source, action='append', default=[], metavar='DESCRIPTION', help='Specify a source object (can be used multiple times)')

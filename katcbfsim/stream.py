@@ -10,6 +10,7 @@ import spead2.send.trollius
 import h5py
 import logging
 import functools
+from collections import deque
 
 
 logger = logging.getLogger(__name__)
@@ -18,31 +19,35 @@ logger = logging.getLogger(__name__)
 class SpeadStream(object):
     """Base class for SPEAD streams, providing a factory function."""
     @classmethod
-    def factory(cls, endpoints):
-        return functools.partial(cls, endpoints)
+    def factory(cls, endpoints, n_streams):
+        return functools.partial(cls, endpoints, n_streams)
 
     @property
-    def n_streams(self):
-        return len(self._streams)
+    def n_endpoints(self):
+        return len(self.endpoints)
 
-    def __init__(self, endpoints, product, in_rate):
+    def __init__(self, endpoints, n_streams, product, in_rate):
         if not endpoints:
             raise ValueError('At least one endpoint is required')
         n = len(endpoints)
-        if product.n_channels % n:
+        if product.n_channels % n_streams:
             raise ValueError('Number of channels not divisible by number of streams')
+        if n_streams % n:
+            raise ValueError('Number of streams not divisible by number of endpoints')
         self.endpoints = endpoints
         self.product = product
+        self.n_streams = n_streams
         self._flavour = spead2.Flavour(4, 64, 48, 0)
         self._inline_format = [('u', self._flavour.heap_address_bits)]
         # Send at a slightly higher rate, to account for overheads, and so
         # that if the sender sends a burst we can catch up with it.
         out_rate = in_rate * 1.05 / n
         config = spead2.send.StreamConfig(rate=out_rate, max_packet_size=9172)
-        self._streams = [
-            spead2.send.trollius.UdpStream(
-                spead2.ThreadPool(), e.host, e.port, config)
-            for e in endpoints]
+        self._streams = []
+        for i in range(n_streams):
+            e = endpoints[i * len(endpoints) // n_streams]
+            self._streams.append(spead2.send.trollius.UdpStream(
+                spead2.ThreadPool(), e.host, e.port, config))
 
     @trollius.coroutine
     def close(self):
@@ -76,26 +81,19 @@ class CBFSpeadStream(SpeadStream):
 
     def add_n_chans_item(self, ig):
         ig.add_item(0x1009, 'n_chans', 'The total number of frequency channels present in any integration.',
-            (), format=self._inline_format, value=self.product.n_channels // self.n_streams)
+            (), format=self._inline_format, value=self.product.n_channels)
 
     def add_n_ants_item(self, ig):
         ig.add_item(0x100A, 'n_ants', 'The total number of dual-pol antennas in the system.',
             (), format=self._inline_format, value=self.product.n_antennas)
 
-    def add_center_freq_item(self, ig, stream_idx):
-        # Find per-stream center frequency
-        center_frequency = (
-            self.product.center_frequency
-            + self.product.bandwidth * (2 * stream_idx + 1 - self.n_streams) / (2 * self.n_streams))
-        # Convert sky frequency to DBE frequency
-        digitised_bandwidth = self.product.adc_rate // 2
-        center_frequency = self.product.center_frequency % digitised_bandwidth
+    def add_center_freq_item(self, ig):
         ig.add_item(0x1011, 'center_freq', 'The center frequency of the DBE in Hz, 64-bit IEEE floating-point number.',
-            (), format=[('f', 64)], value=np.float64(center_frequency))
+            (), format=[('f', 64)], value=np.float64(self.product.center_frequency))
 
     def add_bandwidth_item(self, ig):
         ig.add_item(0x1013, 'bandwidth', 'The analogue bandwidth of the digitally processed signal in Hz.',
-            (), format=[('f', 64)], value=np.float64(self.product.bandwidth / self.n_streams))
+            (), format=[('f', 64)], value=np.float64(self.product.bandwidth))
 
     def add_fft_shift_item(self, ig):
         ig.add_item(0x101E, 'fft_shift', 'The FFT bitshift pattern. F-engine correlator internals.',
@@ -109,12 +107,12 @@ class CBFSpeadStream(SpeadStream):
         ig.add_item(0x1020, 'requant_bits', 'Number of bits per sample after requantisation. For FX correlators, this represents the number of bits after requantisation in the F engines (post FFT and any phasing stages) and is the actual number of bits used in X-engine processing. For time-domain systems, this is requantisation in the time domain before any subsequent processing.',
             (), format=self._inline_format, value=self.requant_bits)
 
-    def add_rx_udp_items(self, ig, stream_idx):
+    def add_rx_udp_items(self, ig, endpoint_idx):
         ig.add_item(0x1022, 'rx_udp_port', 'Destination UDP port for data output.',
-            (), format=self._inline_format, value=self.endpoints[stream_idx].port)
+            (), format=self._inline_format, value=self.endpoints[endpoint_idx].port)
         # TODO: this might need to be translated from hostname to IP address
         ig.add_item(0x1024, 'rx_udp_ip_str', 'Destination IP address for output UDP packets.',
-            (None,), format=[('c', 8)], value=self.endpoints[stream_idx].host)
+            (None,), format=[('c', 8)], value=self.endpoints[endpoint_idx].host)
 
     def add_sync_time_item(self, ig):
         ig.add_item(0x1027, 'sync_time', 'Time at which the system was last synchronised (armed and triggered by a 1PPS) in seconds since the Unix Epoch.',
@@ -130,7 +128,7 @@ class CBFSpeadStream(SpeadStream):
             (), format=[('f', 64)], value=self.scale_factor_timestamp)
 
     def add_eq_coef_items(self, ig):
-        initial_gain = np.zeros((self.product.n_channels // self.n_streams, 2), np.uint32)
+        initial_gain = np.zeros((self.product.n_channels, 2), np.uint32)
         initial_gain[:, 0].fill(200)    # Arbitrary value for now (200 + 0j)
         input_number = 0
         for antenna in self.product.subarray.antennas:
@@ -155,19 +153,23 @@ class CBFSpeadStream(SpeadStream):
         ig.add_item(0x1600, 'timestamp', 'Timestamp of start of this integration. uint counting multiples of ADC samples since last sync (sync_time, id=0x1027). Divide this number by timestamp_scale (id=0x1046) to get back to seconds since last sync when this integration was actually started. Note that the receiver will need to figure out the centre timestamp of the accumulation (eg, by adding half of int_time, id 0x1016).',
             (), None, format=self._inline_format)
 
+    def add_frequency_item(self, ig):
+        ig.add_item(0x4103, 'frequency', 'Identifies the first channel in the band of frequencies in the SPEAD heap. Can be used to reconstruct the full spectrum.',
+            (), None, format=self._inline_format)
+
 
 class FXStreamSpead(CBFSpeadStream):
     """Data stream from an FX correlator, sent over SPEAD."""
-    def __init__(self, endpoints, product):
+    def __init__(self, endpoints, n_streams, product):
         in_rate = product.n_baselines * product.n_channels * 4 * 8 / \
             product.accumulation_length
-        super(FXStreamSpead, self).__init__(endpoints, product, in_rate)
-        self._ig_static = [self._make_ig_static(i) for i in range(self.n_streams)]
+        super(FXStreamSpead, self).__init__(endpoints, n_streams, product, in_rate)
+        self._ig_static = [self._make_ig_static(i) for i in range(self.n_endpoints)]
         self._ig_gain = self._make_ig_gain()
         self._ig_labels = self._make_ig_labels()
         self._ig_data = [self._make_ig_data() for i in range(self.n_streams)]
 
-    def _make_ig_static(self, stream_idx):
+    def _make_ig_static(self, endpoint_idx):
         ig = spead2.send.ItemGroup(flavour=self._flavour)
         self.add_adc_sample_rate_item(ig)
         ig.add_item(0x1008, 'n_bls', 'The total number of baselines in the data product. Each pair of inputs (polarisation pairs) is considered a baseline.',
@@ -175,8 +177,8 @@ class FXStreamSpead(CBFSpeadStream):
         self.add_n_chans_item(ig)
         self.add_n_ants_item(ig)
         ig.add_item(0x100B, 'n_xengs', 'The total number of X engines in a correlator system.',
-            (), format=self._inline_format, value=1)
-        self.add_center_freq_item(ig, stream_idx)
+            (), format=self._inline_format, value=self.n_streams)
+        self.add_center_freq_item(ig)
         self.add_bandwidth_item(ig)
         ig.add_item(0x1015, 'n_accs', 'The number of spectra that are accumulated per integration.',
             (), format=self._inline_format, value=self.product.n_accs)
@@ -185,7 +187,7 @@ class FXStreamSpead(CBFSpeadStream):
         self.add_fft_shift_item(ig)
         self.add_xeng_acc_len_item(ig)
         self.add_requant_bits_item(ig)
-        self.add_rx_udp_items(ig, stream_idx)
+        self.add_rx_udp_items(ig, endpoint_idx)
         self.add_sync_time_item(ig)
         self.add_adc_bits_item(ig)
         self.add_scale_factor_timestamp_item(ig)
@@ -224,15 +226,19 @@ class FXStreamSpead(CBFSpeadStream):
     def _make_ig_data(self):
         ig = spead2.send.ItemGroup(flavour=self._flavour)
         self.add_timestamp_item(ig)
+        self.add_frequency_item(ig)
         # flags_xeng_raw is still TBD in the ICD, so omitted for now
         ig.add_item(0x1800, 'xeng_raw', 'Raw data stream from all the X-engines in the system. For KAT-7, this item represents a full spectrum (all frequency channels) assembled from lowest frequency to highest frequency. Each frequency channel contains the data for all baselines (n_bls given by SPEAD Id=0x1008). Each value is a complex number - two (real and imaginary) signed integers.',
             (self.product.n_channels // self.n_streams, self.product.n_baselines * 4, 2), np.int32)
         return ig
 
     @trollius.coroutine
-    def _send_metadata_stream(self, stream_idx):
+    def _send_metadata_stream(self, endpoint_idx):
+        # Send just once for all the streams sending to the same endpoint,
+        # using the first corresponding stream
+        stream_idx = endpoint_idx * self.n_streams // self.n_endpoints
         stream = self._streams[stream_idx]
-        heap = self._ig_static[stream_idx].get_heap(descriptors='all', data='all')
+        heap = self._ig_static[endpoint_idx].get_heap(descriptors='all', data='all')
         yield From(stream.async_send_heap(heap))
         heap = self._ig_gain.get_heap(descriptors='all', data='all')
         yield From(stream.async_send_heap(heap))
@@ -246,7 +252,7 @@ class FXStreamSpead(CBFSpeadStream):
         """Reissue all the metadata on the streams."""
         futures = []
         # Send on all streams in parallel
-        for i in range(self.n_streams):
+        for i in range(self.n_endpoints):
             futures.append(trollius.async(self._send_metadata_stream(i)))
         for future in futures:
             yield From(future)
@@ -256,7 +262,7 @@ class FXStreamSpead(CBFSpeadStream):
         assert vis.flags.c_contiguous, 'Visibility array must be contiguous'
         shape = (self.product.n_channels, self.product.n_baselines * 4, 2)
         stream_channels = self.product.n_channels // self.n_streams
-        vis_view = vis.reshape(self.product.n_channels, self.product.n_baselines * 4, 2)
+        vis_view = vis.reshape(*shape)
         futures = []
         timestamp = dump_index * self.product.n_accs * self.product.n_channels * self.scale_factor_timestamp // self.product.bandwidth
         # Truncate timestamp to the width of the field it is in
@@ -266,8 +272,12 @@ class FXStreamSpead(CBFSpeadStream):
             channel1 = channel0 + stream_channels
             self._ig_data[i]['xeng_raw'].value = vis_view[channel0:channel1]
             self._ig_data[i]['timestamp'].value = timestamp
+            self._ig_data[i]['frequency'].value = channel0
             heap = self._ig_data[i].get_heap()
-            futures.append(trollius.async(stream.async_send_heap(heap)))
+            # Construct an ID that is both large enough to avoid collisions
+            # with auto-assigned IDs and unique across all streams.
+            cnt = (1 << 40) + self.n_streams * dump_index + i
+            futures.append(trollius.async(stream.async_send_heap(heap, cnt)))
         for future in futures:
             yield From(future)
 
@@ -312,27 +322,27 @@ class FXStreamFile(FileStream):
 
 class BeamformerStreamSpead(CBFSpeadStream):
     """Data stream from a beamformer, sent over SPEAD."""
-    def __init__(self, endpoints, product):
+    def __init__(self, endpoints, n_streams, product):
         if product.wall_interval == 0:
             in_rate = 0
         else:
             in_rate = product.n_channels * product.timesteps * 2 * product.sample_bits / product.wall_interval / 8
-        super(BeamformerStreamSpead, self).__init__(endpoints, product, in_rate)
+        super(BeamformerStreamSpead, self).__init__(endpoints, n_streams, product, in_rate)
         self.xeng_acc_len = self.product.timesteps
-        self._ig_static = [self._make_ig_static(i) for i in range(self.n_streams)]
+        self._ig_static = [self._make_ig_static(i) for i in range(self.n_endpoints)]
         self._ig_weights = self._make_ig_weights()
         self._ig_labels = self._make_ig_labels()
         self._ig_timing = self._make_ig_timing()
         self._ig_data = [self._make_ig_data() for i in range(self.n_streams)]
 
-    def _make_ig_static(self, stream_idx):
+    def _make_ig_static(self, endpoint_idx):
         ig = spead2.send.ItemGroup(flavour=self._flavour)
         self.add_adc_sample_rate_item(ig)
         self.add_n_chans_item(ig)
         self.add_n_ants_item(ig)
         ig.add_item(0x100F, 'n_bengs', 'The total number of B engines in a beamformer system.',
-            (), format=self._inline_format, value=1)
-        self.add_center_freq_item(ig, stream_idx)
+            (), format=self._inline_format, value=self.n_streams)
+        self.add_center_freq_item(ig)
         self.add_bandwidth_item(ig)
         self.add_xeng_acc_len_item(ig)
         self.add_requant_bits_item(ig)
@@ -344,7 +354,7 @@ class BeamformerStreamSpead(CBFSpeadStream):
         # ig.add_item(0x1043, 'ddc_mix_freq', 'Digital downconverter mixing frequency as a fraction of the ADC sampling frequency. eg: 0.25. Set to zero if no DDC is present.',
         #     (), format=[('f', 64)], value=0.0)
         self.add_adc_bits_item(ig)
-        self.add_rx_udp_items(ig, stream_idx)
+        self.add_rx_udp_items(ig, endpoint_idx)
         ig.add_item(0x1050, 'beng_out_bits_per_sample', 'The number of bits per value of the beng accumulator output. Note this is for a single component value, not the combined complex size.',
             (), format=self._inline_format, value=self.product.sample_bits)
         return ig
@@ -371,22 +381,21 @@ class BeamformerStreamSpead(CBFSpeadStream):
     def _make_ig_data(self):
         ig = spead2.send.ItemGroup(flavour=self._flavour)
         self.add_timestamp_item(ig)
-        # frequency is omitted because we have no way to set a per-packet value. It's
-        # useless anyway.
-        # bf_raw is not in v3 of the ICD, but this is according to MKAT-ECP-157
+        self.add_frequency_item(ig)
         ig.add_item(0x5000, 'bf_raw', 'Beamformer output for frequency-domain beam. User-defined name (out of band control). Record length depending on number of frequency channels and F-X packet size (xeng_acc_len).',
             shape=(self.product.n_channels // self.n_streams, self.product.timesteps, 2), dtype=self.product.dtype)
         return ig
 
     @trollius.coroutine
-    def _send_metadata_stream(self, stream_idx):
-        """Reissue all the metadata on the stream."""
+    def _send_metadata_stream(self, endpoint_idx):
+        """Reissue all the metadata on the stream (one for an endpoint)."""
+        stream_idx = endpoint_idx * self.n_streams // self.n_endpoints
         stream = self._streams[stream_idx]
         heap = self._ig_timing.get_heap(descriptors='all', data='all')
         yield From(stream.async_send_heap(heap))
         heap = self._ig_weights.get_heap(descriptors='all', data='all')
         yield From(stream.async_send_heap(heap))
-        heap = self._ig_static[stream_idx].get_heap(descriptors='all', data='all')
+        heap = self._ig_static[endpoint_idx].get_heap(descriptors='all', data='all')
         yield From(stream.async_send_heap(heap))
         heap = self._ig_labels.get_heap(descriptors='all', data='all')
         yield From(stream.async_send_heap(heap))
@@ -398,7 +407,7 @@ class BeamformerStreamSpead(CBFSpeadStream):
         """Reissue all the metadata on the streams."""
         futures = []
         # Send on all streams in parallel
-        for i in range(self.n_streams):
+        for i in range(self.n_endpoints):
             futures.append(trollius.async(self._send_metadata_stream(i)))
         for future in futures:
             yield From(future)
@@ -416,6 +425,9 @@ class BeamformerStreamSpead(CBFSpeadStream):
             self._ig_data[i]['bf_raw'].value = beam_data[channel0:channel1]
             self._ig_data[i]['timestamp'].value = timestamp
             heap = self._ig_data[i].get_heap()
-            futures.append(stream.async_send_heap(heap))
+            # Construct an ID that is both large enough to avoid collisions
+            # with auto-assigned IDs and unique across all streams.
+            cnt = (1 << 40) + self.n_streams * index + i
+            futures.append(stream.async_send_heap(heap, cnt))
         for future in futures:
             yield From(future)

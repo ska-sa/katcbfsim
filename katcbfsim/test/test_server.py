@@ -31,16 +31,17 @@ _current_stream = None
 class MockStream(object):
     """Stream that throws away its data, for testing purposes."""
     @classmethod
-    def factory(cls, endpoints):
-        return functools.partial(cls, endpoints)
+    def factory(cls, endpoints, n_streams):
+        return functools.partial(cls, endpoints, n_streams)
 
-    def __init__(self, endpoints, product):
+    def __init__(self, endpoints, n_streams, product):
         global _current_stream
         self.endpoints = endpoints
         self.product = product
         self.dumps = 0
         self.dumps_semaphore = tornado.locks.Semaphore(0)
         self.closed = False
+        self.n_streams = n_streams
         _current_stream = self
 
     def send_metadata(self):
