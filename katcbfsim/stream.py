@@ -48,6 +48,7 @@ class SpeadStream(object):
             e = endpoints[i * len(endpoints) // n_streams]
             self._streams.append(spead2.send.trollius.UdpStream(
                 spead2.ThreadPool(), e.host, e.port, config))
+            self._streams[-1].set_cnt_sequence(i, n_streams)
 
     @trollius.coroutine
     def close(self):
@@ -274,10 +275,7 @@ class FXStreamSpead(CBFSpeadStream):
             self._ig_data[i]['timestamp'].value = timestamp
             self._ig_data[i]['frequency'].value = channel0
             heap = self._ig_data[i].get_heap()
-            # Construct an ID that is both large enough to avoid collisions
-            # with auto-assigned IDs and unique across all streams.
-            cnt = (1 << 40) + self.n_streams * dump_index + i
-            futures.append(trollius.async(stream.async_send_heap(heap, cnt)))
+            futures.append(trollius.async(stream.async_send_heap(heap)))
         for future in futures:
             yield From(future)
 
@@ -425,9 +423,6 @@ class BeamformerStreamSpead(CBFSpeadStream):
             self._ig_data[i]['bf_raw'].value = beam_data[channel0:channel1]
             self._ig_data[i]['timestamp'].value = timestamp
             heap = self._ig_data[i].get_heap()
-            # Construct an ID that is both large enough to avoid collisions
-            # with auto-assigned IDs and unique across all streams.
-            cnt = (1 << 40) + self.n_streams * index + i
-            futures.append(stream.async_send_heap(heap, cnt))
+            futures.append(stream.async_send_heap(heap))
         for future in futures:
             yield From(future)
