@@ -141,25 +141,30 @@ class SimulatorServer(katcp.DeviceServer):
                                     n_channels, timesteps, sample_bits)
         return 'ok',
 
-    def set_destination(self, product, endpoints):
+    def set_destination(self, product, endpoints, n_streams=None):
+        if n_streams is None:
+            # Formula used by MeerKAT CBF
+            n_streams = 4
+            while n_streams < max(len(endpoints), product.n_antennas * 4):
+                n_streams *= 2
         if isinstance(product, FXProduct):
-            product.destination_factory = stream.FXStreamSpead.factory(endpoints)
+            product.destination_factory = stream.FXStreamSpead.factory(endpoints, n_streams)
         elif isinstance(product, BeamformerProduct):
-            product.destination_factory = stream.BeamformerStreamSpead.factory(endpoints)
+            product.destination_factory = stream.BeamformerStreamSpead.factory(endpoints, n_streams)
         else:
             raise product.UnsupportedProductError('unknown product type')
 
-    @request(Str(), Str())
+    @request(Str(), Str(), Int(optional=True))
     @return_reply()
     @_product_exceptions
     @_product_request
-    def request_capture_destination(self, sock, product, destination):
+    def request_capture_destination(self, sock, product, destination, n_streams=None):
         """Set the destination endpoints for a product"""
         endpoints = endpoint.endpoint_list_parser(None)(destination)
         for e in endpoints:
             if e.port is None:
                 return 'fail', 'no port specified'
-        self.set_destination(product, endpoints)
+        self.set_destination(product, endpoints, n_streams)
         return 'ok',
 
     @request(Str(), Str())
@@ -278,6 +283,19 @@ class SimulatorServer(katcp.DeviceServer):
         """
         self.set_center_frequency(product, frequency)
         return 'ok',
+
+    def set_n_dumps(self, product, n_dumps):
+        product.n_dumps = n_dumps
+
+    @request(Str(), Int())
+    @return_reply()
+    @_product_exceptions
+    @_product_request
+    def request_n_dumps(self, sock, product, n_dumps):
+        """Set a limited number of dumps for a product, after which it will
+        stop.
+        """
+        product.n_dumps = n_dumps
 
     def set_gain(self, gain):
         self._subarray.gain = gain
