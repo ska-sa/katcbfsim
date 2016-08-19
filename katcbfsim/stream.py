@@ -247,6 +247,7 @@ class FXStreamSpead(CBFSpeadStream):
         yield From(stream.async_send_heap(heap))
         heap = self._ig_data[stream_idx].get_heap(descriptors='all', data='none')
         yield From(stream.async_send_heap(heap))
+        yield From(stream.async_send_heap(self._ig_static.get_start()))
 
     @trollius.coroutine
     def send_metadata(self):
@@ -399,6 +400,7 @@ class BeamformerStreamSpead(CBFSpeadStream):
         yield From(stream.async_send_heap(heap))
         heap = self._ig_data[stream_idx].get_heap(descriptors='all', data='none')
         yield From(stream.async_send_heap(heap))
+        yield From(self._stream.async_send_heap(self._ig_static.get_start()))
 
     @trollius.coroutine
     def send_metadata(self):

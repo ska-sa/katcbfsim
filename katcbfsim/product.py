@@ -662,7 +662,11 @@ class BeamformerProduct(CBFProduct):
             data[value % self.n_channels, value % self.timesteps, 1] = (value >> 15) & 0x7f
         yield From(destination.send(data, index))
 
+    @trollius.coroutine
     def _capture(self):
+        """Capture co-routine, started by :meth:`capture_start` and joined by
+        :meth:`capture_stop`.
+        """
         destination = None
         dump_futures = collections.deque()
         try:
