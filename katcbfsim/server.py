@@ -284,6 +284,19 @@ class SimulatorServer(katcp.DeviceServer):
         self.set_center_frequency(product, frequency)
         return 'ok',
 
+    def set_n_dumps(self, product, n_dumps):
+        product.n_dumps = n_dumps
+
+    @request(Str(), Int())
+    @return_reply()
+    @_product_exceptions
+    @_product_request
+    def request_n_dumps(self, sock, product, n_dumps):
+        """Set a limited number of dumps for a product, after which it will
+        stop.
+        """
+        product.n_dumps = n_dumps
+
     def set_gain(self, gain):
         self._subarray.gain = gain
 

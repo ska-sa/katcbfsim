@@ -89,6 +89,8 @@ def prepare_server(server, args):
             args.cbf_channels)
         server.set_accumulation_length(product, args.cbf_int_time)
         server.set_destination(product, args.cbf_spead, args.cbf_streams)
+        if args.dumps:
+            server.set_n_dumps(product, args.dumps)
         if args.start:
             server.capture_start(product)
     if args.create_beamformer_product is not None:
@@ -96,6 +98,8 @@ def prepare_server(server, args):
             args.cbf_adc_sample_rate, args.cbf_center_freq, args.cbf_bandwidth,
             args.cbf_channels, args.beamformer_timesteps, args.beamformer_bits)
         server.set_destination(product, args.cbf_spead, args.cbf_streams)
+        if args.dumps:
+            server.set_n_dumps(product, args.dumps)
         if args.start:
             server.capture_start(product)
 
@@ -106,6 +110,7 @@ def main():
     group.add_argument('--create-fx-product', type=str, metavar='NAME', help='Create a correlator product without prompting from katcp')
     group.add_argument('--create-beamformer-product', type=str, metavar='NAME', help='Create a beamformer product without prompting from katcp')
     parser.add_argument('--start', action='store_true', help='Start the defined products')
+    parser.add_argument('--dumps', type=int, help='Set finite number of dumps to produce for pre-configured products [infinite]')
     parser.add_argument('--cbf-channels', type=int, default=32768, metavar='N', help='Number of channels [%(default)s]')
     parser.add_argument('--cbf-adc-sample-rate', type=int, default=1712000000, metavar='HZ', help='ADC rate [%(default)s]'),
     parser.add_argument('--cbf-bandwidth', type=int, default=856000000, metavar='HZ', help='Bandwidth [%(default)s]')

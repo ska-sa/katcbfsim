@@ -331,6 +331,8 @@ class CBFProduct(Product):
         Bandwidth of all channels in the product, in Hz
     n_channels : int
         Number of channels in the product
+    n_dumps : int
+        If not ``None``, limits the number of dumps that will be done
     """
     def __init__(self, subarray, name, adc_rate, center_frequency, bandwidth,
                  n_channels, loop=None):
@@ -339,6 +341,7 @@ class CBFProduct(Product):
         self.center_frequency = center_frequency
         self.bandwidth = bandwidth
         self.n_channels = n_channels
+        self.n_dumps = None
 
 
 class FXProduct(CBFProduct):
@@ -544,7 +547,7 @@ class FXProduct(CBFProduct):
             host_r = [resource.Resource(x, loop=self._loop) for x in host]
             stream_r = resource.Resource(destination, loop=self._loop)
             wall_time = self._loop.time()
-            while True:
+            while self.n_dumps is None or index < self.n_dumps:
                 predict_a = predict_r.acquire()
                 data_a = data_r[index % len(data_r)].acquire()
                 host_a = host_r[index % len(host_r)].acquire()
@@ -674,7 +677,7 @@ class BeamformerProduct(CBFProduct):
             yield From(destination.send_metadata())
             index = 0
             wall_time = self._loop.time()
-            while True:
+            while self.n_dumps is None or index < self.n_dumps:
                 while len(dump_futures) > 3:
                     yield From(dump_futures[0])
                     dump_futures.popleft()
