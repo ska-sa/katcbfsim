@@ -7,6 +7,8 @@ decorator
 funcsigs
 futures
 h5py
+katcp
+katversion
 linecache2
 Mako
 MarkupSafe
@@ -33,8 +35,6 @@ traceback2
 trollius
 unittest2
 zope.interface
-git+ssh://git@github.com/ska-sa/katcp-python#katcp
 git+ssh://git@github.com/ska-sa/katpoint
 git+ssh://git@github.com/ska-sa/katsdptelstate
 git+ssh://git@github.com/ska-sa/katsdpsigproc
-git+ssh://git@github.com/ska-sa/katversion
