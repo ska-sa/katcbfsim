@@ -77,7 +77,7 @@ def prepare_server(server, args):
     if args.cbf_sim_source_file is not None:
         with open(args.cbf_sim_source_file) as f:
             for line in f:
-                server.add_antenna(katpoint.Target(line))
+                server.add_source(katpoint.Target(line))
     if args.cbf_sync_time is not None:
         server.set_sync_time(args.cbf_sync_time)
     server.set_gain(args.cbf_sim_gain)
