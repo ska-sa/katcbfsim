@@ -102,6 +102,10 @@ def prepare_server(server, args):
             server.set_n_dumps(product, args.dumps)
         if args.start:
             server.capture_start(product)
+    if args.telstate is not None:
+        # Consumers may wait for cam2telstate to set its status to 'ready'
+        # before fetching attributes.
+        args.telstate.add('sdp_cam2telstate_status', 'ready')
 
 
 def main():
