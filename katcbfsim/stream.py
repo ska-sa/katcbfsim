@@ -42,7 +42,7 @@ class SpeadStream(object):
         # Send at a slightly higher rate, to account for overheads, and so
         # that if the sender sends a burst we can catch up with it.
         out_rate = in_rate * 1.05 / n
-        config = spead2.send.StreamConfig(rate=out_rate, max_packet_size=9172)
+        config = spead2.send.StreamConfig(rate=out_rate, max_packet_size=4096)
         self._streams = []
         for i in range(n_streams):
             e = endpoints[i * len(endpoints) // n_streams]
