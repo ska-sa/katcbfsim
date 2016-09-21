@@ -9,6 +9,7 @@ from tornado.platform.asyncio import AsyncIOMainLoop, to_asyncio_future
 import signal
 import argparse
 import logging
+import time
 import katcbfsim.server
 from katcbfsim.product import FXProduct, Subarray
 from katsdpsigproc import accel
@@ -108,6 +109,16 @@ def prepare_server(server, args):
         args.telstate.add('sdp_cam2telstate_status', 'ready')
 
 
+def configure_logging(level):
+    formatter = logging.Formatter("%(asctime)s.%(msecs)03dZ - %(filename)s:%(lineno)s - %(levelname)s - %(message)s",
+                                  datefmt="%Y-%m-%d %H:%M:%S")
+    formatter.converter = time.gmtime
+    sh = logging.StreamHandler()
+    sh.setFormatter(formatter)
+    logging.root.addHandler(sh)
+    logging.root.setLevel(level.upper())
+
+
 def main():
     parser = katsdptelstate.ArgumentParser()
     group = parser.add_mutually_exclusive_group()
@@ -134,10 +145,11 @@ def main():
     parser.add_argument('--beamformer-bits', metavar='BITS', type=int, choices=[8, 16, 32], default=8, help='Bits per real value in beamformer data [%(default)s]')
     parser.add_argument('--port', '-p', type=int, default=7147, help='katcp host port [%(default)s]')
     parser.add_argument('--host', '-a', type=str, default='', help='katcp host address [all hosts]')
+    parser.add_argument('--log-level', '-l', default='INFO', help='logging level [%(default)s]')
     args = parser.parse_args()
     if args.start and args.create_fx_product is None and args.create_beamformer_product is None:
         parser.error('--start requires --create-fx-product or --create-beamformer-product')
-    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s:%(name)s: %(message)s')
+    configure_logging(args.log_level)
 
     context = accel.create_some_context(interactive=False)
     ioloop = AsyncIOMainLoop()
