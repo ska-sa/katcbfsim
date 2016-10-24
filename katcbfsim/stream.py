@@ -128,6 +128,12 @@ class CBFSpeadStream(SpeadStream):
         ig.add_item(0x1046, 'scale_factor_timestamp', 'Timestamp scaling factor. Divide the SPEAD data packet timestamp by this number to get back to seconds since last sync.',
             (), format=[('f', 64)], value=self.scale_factor_timestamp)
 
+    def add_ticks_between_spectra_item(self, ig):
+        ticks_between_spectra = self.product.n_channels * 2 * \
+                                self.scale_factor_timestamp // self.product.adc_rate
+        ig.add_item(0x104A, 'ticks_between_spectra', 'Number of sample ticks between spectra.',
+            (), format=self._inline_format, value=ticks_between_spectra)
+
     def add_eq_coef_items(self, ig):
         initial_gain = np.zeros((self.product.n_channels, 2), np.uint32)
         initial_gain[:, 0].fill(200)    # Arbitrary value for now (200 + 0j)
@@ -191,6 +197,7 @@ class FXStreamSpead(CBFSpeadStream):
         self.add_rx_udp_items(ig, endpoint_idx)
         self.add_sync_time_item(ig)
         self.add_adc_bits_item(ig)
+        self.add_ticks_between_spectra_item(ig)
         self.add_scale_factor_timestamp_item(ig)
         ig.add_item(0x1048, 'xeng_out_bits_per_sample', 'The number of bits per value of the xeng accumulator output. Note this is for a single component value, not the combined complex size.',
             (), format=self._inline_format, value=32)
@@ -353,6 +360,7 @@ class BeamformerStreamSpead(CBFSpeadStream):
         # ig.add_item(0x1043, 'ddc_mix_freq', 'Digital downconverter mixing frequency as a fraction of the ADC sampling frequency. eg: 0.25. Set to zero if no DDC is present.',
         #     (), format=[('f', 64)], value=0.0)
         self.add_adc_bits_item(ig)
+        self.add_ticks_between_spectra_item(ig)
         self.add_rx_udp_items(ig, endpoint_idx)
         ig.add_item(0x1050, 'beng_out_bits_per_sample', 'The number of bits per value of the beng accumulator output. Note this is for a single component value, not the combined complex size.',
             (), format=self._inline_format, value=self.product.sample_bits)
@@ -387,7 +395,7 @@ class BeamformerStreamSpead(CBFSpeadStream):
 
     @trollius.coroutine
     def _send_metadata_stream(self, endpoint_idx):
-        """Reissue all the metadata on the stream (one for an endpoint)."""
+        """Reissue all the metadata on the stream (for one endpoint)."""
         stream_idx = endpoint_idx * self.n_streams // self.n_endpoints
         stream = self._streams[stream_idx]
         heap = self._ig_timing.get_heap(descriptors='all', data='all')
@@ -400,7 +408,7 @@ class BeamformerStreamSpead(CBFSpeadStream):
         yield From(stream.async_send_heap(heap))
         heap = self._ig_data[stream_idx].get_heap(descriptors='all', data='none')
         yield From(stream.async_send_heap(heap))
-        yield From(self._stream.async_send_heap(self._ig_static[endpoint_idx].get_start()))
+        yield From(stream.async_send_heap(self._ig_static[endpoint_idx].get_start()))
 
     @trollius.coroutine
     def send_metadata(self):
