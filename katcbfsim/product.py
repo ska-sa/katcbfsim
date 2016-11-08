@@ -263,7 +263,10 @@ class Product(object):
         if not self.capturing:
             logger.warn('Ignoring attempt to stop capture when not running')
             return
-        self._stop_future.set_result(None)
+        # Need to check if a result has been set to protect against concurrent
+        # stops.
+        if not self._stop_future.done():
+            self._stop_future.set_result(None)
         yield From(self._capture_future)
         self._stop_future = None
         self._capture_future = None

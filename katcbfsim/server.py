@@ -71,8 +71,10 @@ class SimulatorServer(katcp.DeviceServer):
         else:
             self._subarray = subarray
         self._telstate = telstate
-        # Dictionary of dictionaries, indexed by product then sensor name
+        #: Dictionary of dictionaries, indexed by product then sensor name
         self._product_sensors = {}
+        #: Set when halt is called
+        self._halting = False
 
     def setup_sensors(self):
         self.add_sensor(Sensor.discrete('device-status',
@@ -126,6 +128,8 @@ class SimulatorServer(katcp.DeviceServer):
         """
         if name in self._products:
             return 'fail', 'product {} already exists'.format(name)
+        if self._halting:
+            return 'fail', 'cannot add a product while halting'
         if self._context is None:
             return 'fail', 'no device context available'
         self.add_fx_product(name, adc_rate, center_frequency, bandwidth, n_channels)
@@ -139,6 +143,8 @@ class SimulatorServer(katcp.DeviceServer):
         """Create a new simulated beamformer product"""
         if name in self._products:
             return 'fail', 'product {} already exists'.format(name)
+        if self._halting:
+            return 'fail', 'cannot add a product while halting'
         self.add_beamformer_product(name, adc_rate, center_frequency, bandwidth,
                                     n_channels, timesteps, sample_bits)
         return 'ok',
@@ -403,6 +409,8 @@ class SimulatorServer(katcp.DeviceServer):
     @_product_request
     def request_capture_start(self, sock, product):
         """Start the flow of data for a product"""
+        if self._halting:
+            return 'fail', 'cannot start capture while halting'
         self.capture_start(product)
         return 'ok',
 
@@ -421,6 +429,7 @@ class SimulatorServer(katcp.DeviceServer):
 
     @tornado.gen.coroutine
     def request_halt(self, req, msg):
+        self._halting = True  # Prevents changes to _products while we iterate
         for product in self._products.values():
             stop = trollius.async(product.capture_stop())
             yield tornado.platform.asyncio.to_tornado_future(stop)
