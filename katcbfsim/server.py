@@ -48,7 +48,7 @@ class SimulatorServer(katcp.DeviceServer):
 
     Parameters
     ----------
-    context : compute device context
+    context : compute device context, optional
         Compute device context used for device-accelerated simulations
     subarray : :class:`katcbfsim.product.Subarray`, optional
         Preconfigured subarray. If not specified, an unconfigured subarray is created.
@@ -62,7 +62,7 @@ class SimulatorServer(katcp.DeviceServer):
     VERSION_INFO = ('katcbfsim-api', 1, 0)
     BUILD_INFO = ('katcbfsim', 0, 1, '')
 
-    def __init__(self, context, subarray=None, telstate=None, *args, **kwargs):
+    def __init__(self, context=None, subarray=None, telstate=None, *args, **kwargs):
         super(SimulatorServer, self).__init__(*args, **kwargs)
         self._context = context
         self._products = {}
@@ -126,6 +126,8 @@ class SimulatorServer(katcp.DeviceServer):
         """
         if name in self._products:
             return 'fail', 'product {} already exists'.format(name)
+        if self._context is None:
+            return 'fail', 'no device context available'
         self.add_fx_product(name, adc_rate, center_frequency, bandwidth, n_channels)
         return 'ok',
 
