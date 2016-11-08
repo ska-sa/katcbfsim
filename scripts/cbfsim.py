@@ -151,7 +151,11 @@ def main():
         parser.error('--start requires --create-fx-product or --create-beamformer-product')
     configure_logging(args.log_level)
 
-    context = accel.create_some_context(interactive=False)
+    try:
+        context = accel.create_some_context(interactive=False)
+    except:
+        logging.warn('Could not create a device context. FX simulation will not be possible')
+        context = None
     ioloop = AsyncIOMainLoop()
     ioloop.install()
     if args.telstate is not None:
