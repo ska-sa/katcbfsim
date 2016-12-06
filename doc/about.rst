@@ -60,9 +60,8 @@ need to be specified.
 
 Installation
 ------------
-Installation uses the normal setup.py, with the caveat that katcp must be at
-least 0.6.x (which is not yet released on PyPI, and hence cannot be expressed
-as a setuptools requirement).
+Installation uses the normal setup.py, and so can be installed with pip or
+other Python packaging tools.
 
 A CUDA-capable GPU and corresponding drivers must be present. This is currently
 the case for the beamformer simulation as well, even though it is not used in
@@ -76,7 +75,7 @@ There are several ways to run a simulation, which can also be mixed.
    simulation, and it is also the pointing direction.
 
 2. Using katcp_. The sources, antennas, target etc are specified through katcp
-   commands. In this mode, it is possible to simulate multiple products, and
+   commands. In this mode, it is possible to simulate multiple streams, and
    to sent visibilities to HDF5 files instead of the network.
 
 3. Using katsdptelstate_. Static configuration is stored in the :attr:`config`
@@ -93,9 +92,9 @@ There are several ways to run a simulation, which can also be mixed.
 .. _katsdptelstate: https://github.com/ska-sa/katsdptelstate
 
 The configuration is split into information describing the virtual world
-(antennas, sources and so on) and information about the virtual correlator
-(called a "product"). Because the katcp_ interface supports multiple products,
-the per-product commands all take a product name.
+(antennas, sources and so on) and information about the virtual correlator or
+beamformer (called a "stream"). Because the katcp_ interface supports multiple
+streams, the per-stream commands all take a stream name.
 
 The world information needed is:
 
@@ -123,7 +122,7 @@ The world information needed is:
   expressed as a scale factor per Hz of channel bandwidth per second of
   integration time.
 
-The product information is:
+The stream information is:
 
 - A name, which is used in katcp requests and sensor names.
 
@@ -149,20 +148,20 @@ a few key options are documented here.
 
 .. program:: cbfsim.py
 
-.. option:: --create-fx-product <NAME>
+.. option:: --create-fx-stream <NAME>
 
-   This creates a correlator product with the given name. If this option is not
-   specified, then the katcp request :samp:`product-create-correlator` must be
-   used to create products.
+   This creates a correlator stream with the given name. If this option is not
+   specified, then the katcp request :samp:`stream-create-correlator` must be
+   used to create streams.
 
-.. option:: --create-beamformer-product <NAME>
+.. option:: --create-beamformer-stream <NAME>
 
-   This is equivalent to :option:`--create-fx-product` but for beamformer
-   products.
+   This is equivalent to :option:`--create-fx-stream` but for beamformer
+   streams.
 
 .. option:: --start
 
-   Start the capture for the product. If this option is not specified, the
+   Start the capture for the stream. If this option is not specified, the
    katcp request :samp:`capture-init` must be used to start the capture.
 
 .. option:: --cbf-antenna <DESCRIPTION>
@@ -206,7 +205,7 @@ katcp protocol
 Use the :samp:`?help` command to obtain a full list of commands. The general
 flow is
 
-1. Define a product with :samp:`?product-create-correlator`.
+1. Define a stream with :samp:`?stream-create-correlator`.
 
 2. Set world and correlator static properties.
 
@@ -234,8 +233,3 @@ in the :attr:`config` dictionary:
   (without whitespace). For an antenna named `name`, the attribute
   :samp:`{name}_observer` is used to obtain the antenna. It can be specified as
   either a description string or an antenna object.
-
-The :samp:`?configure-product-from-telstate` request is similar, but takes a
-product name and configures the product:
-
-- The requested dump rate is loaded from ``telstate['sub_dump_rate']``.

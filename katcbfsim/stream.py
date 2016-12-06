@@ -1,438 +1,708 @@
-"""Output stream abstraction"""
-
 from __future__ import print_function, division
 import trollius
-from trollius import From
-import numpy as np
-import spead2
-import spead2.send
-import spead2.send.trollius
-import h5py
 import logging
-import functools
-from collections import deque
+import collections
+from trollius import From, Return
+from katsdptelstate import endpoint
+from katsdpsigproc import accel, resource
+import katpoint
+import numpy as np
+import math
+from . import rime
 
 
 logger = logging.getLogger(__name__)
 
 
-class SpeadStream(object):
-    """Base class for SPEAD streams, providing a factory function."""
-    @classmethod
-    def factory(cls, endpoints, n_streams):
-        return functools.partial(cls, endpoints, n_streams)
+class CaptureInProgressError(RuntimeError):
+    """Exception thrown when trying to modify some value that may not be
+    modified while data capture is running.
+    """
+    pass
+
+
+class IncompleteConfigError(RuntimeError):
+    """Exception thrown when requesting capture but the stream or subarray
+    is missing necessary configuration.
+    """
+    pass
+
+
+class UnsupportedStreamError(RuntimeError):
+    """Exception thrown for operations not supported on this stream type."""
+    pass
+
+
+class Subarray(object):
+    """Model of an array, the sky, and possibly other simulation parameters,
+    shared by several data streams. A subarray should first be configured
+    before starting capture on any of the corresponding streams, and must
+    remain immutable (except where noted) while any stream is capturing.
+    This is partly enforced by exceptions thrown from setters, but the
+    :attr:`antennas` and :attr:`sources` attributes are mutable lists and so
+    suitable care must be taken.
+
+    Attributes
+    ----------
+    antennas : list of :class:`katpoint.Antenna`
+        The antennas in the simulated array.
+    sources : list of :class:`katpoint.Target`
+        The simulated sources. Only point sources are currently supported.
+        The do not necessarily have to be radec targets, and the position
+        and flux model can safely be changed on the fly.
+    target : :class:`katpoint.Target`
+        Target. This determines the phase center for the simulation (and
+        eventually the center for the beam model as well).
+    sync_time : :class:`katpoint.Timestamp`
+        Start time for the simulated capture. When set, it is truncated to a
+        whole number of seconds.
+    gain : float
+        Expected output visibility value, per Jansky per Hz per second
+    clock_ratio : float
+        Scale factor between virtual time in the simulation and wall clock
+        time. Smaller values will run the simulation faster; setting it to 0
+        will cause the simulation to run as fast as possible.
+    """
+    def __init__(self):
+        self.antennas = []
+        self.sources = []
+        self.target = None
+        self.position = None
+        self._sync_time = katpoint.Timestamp()
+        self._gain = 1e-4
+        self._clock_ratio = 1.0
+        self.capturing = 0     # Number of stream that are capturing
+
+    def add_antenna(self, antenna):
+        """Add a new antenna to the simulation.
+
+        Parameters
+        ----------
+        antenna : :class:`katpoint.Antenna`
+            New antenna
+
+        Raises
+        ------
+        CaptureInProgressError
+            If any associated stream has a capture is in progress
+        """
+        if self.capturing:
+            raise CaptureInProgressError('cannot add antennas while capture is in progress')
+        self.antennas.append(antenna)
+
+    def add_source(self, source):
+        """Add a new source to the simulation.
+
+        See :attr:`sources` for details on what types of source are supported.
+
+        Parameters
+        ----------
+        source : :class:`katpoint.Target`
+            New source
+
+        Raises
+        ------
+        CaptureInProgressError
+            If any associated stream has a capture is in progress
+        """
+        if self.capturing:
+            raise CaptureInProgressError('cannot add source while capture is in progress')
+        if source.flux_model is None:
+            logging.warn('source has no flux model; it will be assumed to be 1 Jy')
+        self.sources.append(source)
+
+    def ensure_source(self, timestamp):
+        """Ensure that at least one source exists. If no source exists, a 1 Jy
+        source is placed at the phase center (which must exist at `timestamp`).
+
+        Parameters
+        ----------
+        timestamp : float
+            Time at which to look up the target
+        """
+        if not self.sources:
+            self.sources.append(self.target_at(timestamp))
 
     @property
-    def n_endpoints(self):
-        return len(self.endpoints)
+    def sync_time(self):
+        return self._sync_time
 
-    def __init__(self, endpoints, n_streams, product, in_rate):
-        if not endpoints:
-            raise ValueError('At least one endpoint is required')
-        n = len(endpoints)
-        if product.n_channels % n_streams:
-            raise ValueError('Number of channels not divisible by number of streams')
-        if n_streams % n:
-            raise ValueError('Number of streams not divisible by number of endpoints')
-        self.endpoints = endpoints
-        self.product = product
-        self.n_streams = n_streams
-        self._flavour = spead2.Flavour(4, 64, 48, 0)
-        self._inline_format = [('u', self._flavour.heap_address_bits)]
-        # Send at a slightly higher rate, to account for overheads, and so
-        # that if the sender sends a burst we can catch up with it.
-        out_rate = in_rate * 1.05 / n
-        config = spead2.send.StreamConfig(rate=out_rate, max_packet_size=4096)
-        self._streams = []
-        for i in range(n_streams):
-            e = endpoints[i * len(endpoints) // n_streams]
-            self._streams.append(spead2.send.trollius.UdpStream(
-                spead2.ThreadPool(), e.host, e.port, config))
-            self._streams[-1].set_cnt_sequence(i, n_streams)
+    @sync_time.setter
+    def sync_time(self, value):
+        if self.capturing:
+            raise CaptureInProgressError('cannot set sync time while capture is in progress')
+        self._sync_time = katpoint.Timestamp(int(value.secs))
 
-    @trollius.coroutine
-    def close(self):
-        # This is to ensure that the end packet won't be dropped for lack of
-        # space in the sending buffer. In normal use it won't do anything
-        # because we always asynchronously wait for transmission, but in an
-        # exception case there might be pending sends.
-        for i, stream in enumerate(self._streams):
-            heap = self._ig_data[i].get_end()
-            yield From(stream.async_flush())
-            yield From(stream.async_send_heap(heap))
+    @property
+    def gain(self):
+        return self._gain
+
+    @gain.setter
+    def gain(self, value):
+        if self.capturing:
+            raise CaptureInProgressError('cannot set gain while capture is in progress')
+        self._gain = value
+
+    @property
+    def clock_ratio(self):
+        return self._clock_ratio
+
+    @clock_ratio.setter
+    def clock_ratio(self, value):
+        if self.capturing:
+            raise CaptureInProgressError('cannot set clock ratio while capture is in progress')
+        self._clock_ratio = value
+
+    def target_at(self, timestamp):
+        """Obtains the target at a given point in simulated time. In this base
+        class this just returns :attr:`target`, but it can be overridden by
+        subclasses to allow the target to be pulled rather than pushed."""
+        return self.target
+
+    def position_at(self, timestamp):
+        """Obtains the position (pointing direction) at a given point in
+        simulated time. In this base class this just returns :attr:`position`,
+        but it can be overridden by subclasses to allow the target to be pulled
+        rather than pushed."""
+        return self.position
 
 
-class CBFSpeadStream(SpeadStream):
-    """Common base class for correlator and beamformer streams, with utilities
-    for shared items.
+class Stream(object):
+    """Base class for simulated streams. It provides the basic machinery to
+    start and stop capture running in a separate asyncio task.
+
+    Unless otherwise documented, changing any attributes while a capture is in
+    progress has undefined behaviour. In some cases, but not all, this is
+    enforced by a :exc:`CaptureInProgressError`.
+
+    Parameters
+    ----------
+    subarray : :class:`Subarray`
+        Subarray corresponding to this stream
+    name : str
+        Name for this stream (used by katcp)
+    loop : :class:`trollius.BaseEventLoop`, optional
+        Event loop for coroutines
+
+    Attributes
+    ----------
+    name : :class:`str`
+        Name for this stream (used by katcp)
+    subarray : :class:`Subarray`
+        Subarray corresponding to this stream
+    n_antennas : int, read-only
+        Number of antennas
+    n_baselines : int, read-only
+        Number of baselines (antenna pairs, not input pairs)
+    transport_factory : callable
+        Called with `self` to return a transport on which output will be sent.
+    capturing : bool, read-only
+        Whether a capture is in progress. This is true from
+        :meth:`capture_start` until :meth:`capture_stop` completes, even if
+        the capture coroutine terminates earlier.
     """
-    def __init__(self, *args, **kwargs):
-        super(CBFSpeadStream, self).__init__(*args, **kwargs)
-        # Hard-coded values assumed from the ICD or the real CBF
-        self.fft_shift_pattern = 32767
-        self.xeng_acc_len = 256
-        self.requant_bits = 8
-        self.adc_bits = 10
-        # CBF apparently use this, even though it wraps pretty quickly
-        self.scale_factor_timestamp = self.product.adc_rate
-
-    def add_adc_sample_rate_item(self, ig):
-        ig.add_item(0x1007, 'adc_sample_rate', 'Expected ADC sample rate (sampled/second)',
-            (), format=[('u', 64)], value=self.product.adc_rate)
-
-    def add_n_chans_item(self, ig):
-        ig.add_item(0x1009, 'n_chans', 'The total number of frequency channels present in any integration.',
-            (), format=self._inline_format, value=self.product.n_channels)
-
-    def add_n_ants_item(self, ig):
-        ig.add_item(0x100A, 'n_ants', 'The total number of dual-pol antennas in the system.',
-            (), format=self._inline_format, value=self.product.n_antennas)
-
-    def add_center_freq_item(self, ig):
-        ig.add_item(0x1011, 'center_freq', 'The center frequency of the DBE in Hz, 64-bit IEEE floating-point number.',
-            (), format=[('f', 64)], value=np.float64(self.product.center_frequency))
-
-    def add_bandwidth_item(self, ig):
-        ig.add_item(0x1013, 'bandwidth', 'The analogue bandwidth of the digitally processed signal in Hz.',
-            (), format=[('f', 64)], value=np.float64(self.product.bandwidth))
-
-    def add_fft_shift_item(self, ig):
-        ig.add_item(0x101E, 'fft_shift', 'The FFT bitshift pattern. F-engine correlator internals.',
-            (), format=self._inline_format, value=self.fft_shift_pattern)
-
-    def add_xeng_acc_len_item(self, ig):
-        ig.add_item(0x101F, 'xeng_acc_len', 'Number of spectra accumulated inside X engine. Determines minimum integration time and user-configurable integration time step-size. X-engine correlator internals',
-            (), format=self._inline_format, value=self.xeng_acc_len)
-
-    def add_requant_bits_item(self, ig):
-        ig.add_item(0x1020, 'requant_bits', 'Number of bits per sample after requantisation. For FX correlators, this represents the number of bits after requantisation in the F engines (post FFT and any phasing stages) and is the actual number of bits used in X-engine processing. For time-domain systems, this is requantisation in the time domain before any subsequent processing.',
-            (), format=self._inline_format, value=self.requant_bits)
-
-    def add_rx_udp_items(self, ig, endpoint_idx):
-        ig.add_item(0x1022, 'rx_udp_port', 'Destination UDP port for data output.',
-            (), format=self._inline_format, value=self.endpoints[endpoint_idx].port)
-        # TODO: this might need to be translated from hostname to IP address
-        ig.add_item(0x1024, 'rx_udp_ip_str', 'Destination IP address for output UDP packets.',
-            (None,), format=[('c', 8)], value=self.endpoints[endpoint_idx].host)
-
-    def add_sync_time_item(self, ig):
-        ig.add_item(0x1027, 'sync_time', 'Time at which the system was last synchronised (armed and triggered by a 1PPS) in seconds since the Unix Epoch.',
-            (), format=self._inline_format, value=self.product.subarray.sync_time.secs)
-
-    def add_adc_bits_item(self, ig):
-        ig.add_item(0x1045, 'adc_bits', 'ADC resolution (number of bits).',
-            (), format=self._inline_format, value=self.adc_bits)
-
-    def add_scale_factor_timestamp_item(self, ig):
-        # TODO: what scaling factor should we use?
-        ig.add_item(0x1046, 'scale_factor_timestamp', 'Timestamp scaling factor. Divide the SPEAD data packet timestamp by this number to get back to seconds since last sync.',
-            (), format=[('f', 64)], value=self.scale_factor_timestamp)
-
-    def add_ticks_between_spectra_item(self, ig):
-        ticks_between_spectra = self.product.n_channels * 2 * \
-                                self.scale_factor_timestamp // self.product.adc_rate
-        ig.add_item(0x104A, 'ticks_between_spectra', 'Number of sample ticks between spectra.',
-            (), format=self._inline_format, value=ticks_between_spectra)
-
-    def add_eq_coef_items(self, ig):
-        initial_gain = np.zeros((self.product.n_channels, 2), np.uint32)
-        initial_gain[:, 0].fill(200)    # Arbitrary value for now (200 + 0j)
-        input_number = 0
-        for antenna in self.product.subarray.antennas:
-            for pol in ('v', 'h'):
-                ig.add_item(0x1400 + input_number, 'eq_coef_{}{}'.format(antenna.name, pol), 'The unitless, per-channel, digital scaling factors implemented prior to requantisation, for inputN. Complex number (real,imag) 32 bit integers.',
-                    initial_gain.shape, initial_gain.dtype, value=initial_gain)
-                input_number += 1
-
-    def add_input_labelling_item(self, ig):
-        labelling = []
-        input_number = 0
-        for i, antenna in enumerate(self.product.subarray.antennas):
-            for pol in ('v', 'h'):
-                name = antenna.name + pol
-                labelling.append((name, input_number, 'simulator', input_number))
-                input_number += 1
-        labelling = np.rec.fromrecords(labelling)
-        ig.add_item(0x100E, 'input_labelling', "The physical location of each antenna's connection. It is an array of structures, each with (str,int,str,int) the following form in the case of KAT-7: (user-assigned_antenna_name, systemwide_unique_input_number, LRU, input_number_on_this_LRU). An example entry might be: ('antC23y',12,'roach030267',3)",
-            labelling.shape, labelling.dtype, value=labelling)
-
-    def add_timestamp_item(self, ig):
-        ig.add_item(0x1600, 'timestamp', 'Timestamp of start of this integration. uint counting multiples of ADC samples since last sync (sync_time, id=0x1027). Divide this number by timestamp_scale (id=0x1046) to get back to seconds since last sync when this integration was actually started. Note that the receiver will need to figure out the centre timestamp of the accumulation (eg, by adding half of int_time, id 0x1016).',
-            (), None, format=self._inline_format)
-
-    def add_frequency_item(self, ig):
-        ig.add_item(0x4103, 'frequency', 'Identifies the first channel in the band of frequencies in the SPEAD heap. Can be used to reconstruct the full spectrum.',
-            (), None, format=self._inline_format)
-
-
-class FXStreamSpead(CBFSpeadStream):
-    """Data stream from an FX correlator, sent over SPEAD."""
-    def __init__(self, endpoints, n_streams, product):
-        in_rate = product.n_baselines * product.n_channels * 4 * 8 / \
-            product.accumulation_length
-        super(FXStreamSpead, self).__init__(endpoints, n_streams, product, in_rate)
-        self._ig_static = [self._make_ig_static(i) for i in range(self.n_endpoints)]
-        self._ig_gain = self._make_ig_gain()
-        self._ig_labels = self._make_ig_labels()
-        self._ig_data = [self._make_ig_data() for i in range(self.n_streams)]
-
-    def _make_ig_static(self, endpoint_idx):
-        ig = spead2.send.ItemGroup(flavour=self._flavour)
-        self.add_adc_sample_rate_item(ig)
-        ig.add_item(0x1008, 'n_bls', 'The total number of baselines in the data product. Each pair of inputs (polarisation pairs) is considered a baseline.',
-            (), format=self._inline_format, value=self.product.n_baselines * 4)
-        self.add_n_chans_item(ig)
-        self.add_n_ants_item(ig)
-        ig.add_item(0x100B, 'n_xengs', 'The total number of X engines in a correlator system.',
-            (), format=self._inline_format, value=self.n_streams)
-        self.add_center_freq_item(ig)
-        self.add_bandwidth_item(ig)
-        ig.add_item(0x1015, 'n_accs', 'The number of spectra that are accumulated per integration.',
-            (), format=self._inline_format, value=self.product.n_accs)
-        ig.add_item(0x1016, 'int_time', "Approximate (it's a float!) time per accumulation in seconds. This is intended for reference only. Each accumulation has an associated timestamp which should be used to determine the time of the integration rather than incrementing the start time by this value for sequential integrations (which would allow errors to grow).",
-            (), format=[('f', 64)], value=self.product.accumulation_length)
-        self.add_fft_shift_item(ig)
-        self.add_xeng_acc_len_item(ig)
-        self.add_requant_bits_item(ig)
-        self.add_rx_udp_items(ig, endpoint_idx)
-        self.add_sync_time_item(ig)
-        self.add_adc_bits_item(ig)
-        self.add_ticks_between_spectra_item(ig)
-        self.add_scale_factor_timestamp_item(ig)
-        ig.add_item(0x1048, 'xeng_out_bits_per_sample', 'The number of bits per value of the xeng accumulator output. Note this is for a single component value, not the combined complex size.',
-            (), format=self._inline_format, value=32)
-        # TODO: missing the following (shouldn't be needed by anything?)
-        # - feng_udp_port
-        # - eng_rate
-        # - x_per_fpga
-        # - ddc_mix_freq
-        # - f_per_fpga
-        return ig
-
-    def _make_ig_gain(self):
-        ig = spead2.send.ItemGroup(flavour=self._flavour)
-        self.add_eq_coef_items(ig)
-        return ig
-
-    def _make_ig_labels(self):
-        ig = spead2.send.ItemGroup(flavour=self._flavour)
-        baselines = []
-        for i in range(self.product.n_antennas):
-            for j in range(i, self.product.n_antennas):
-                for pol1 in ('v', 'h'):
-                    for pol2 in ('v', 'h'):
-                        name1 = self.product.subarray.antennas[i].name + pol1
-                        name2 = self.product.subarray.antennas[j].name + pol2
-                        baselines.append([name1, name2])
-        baselines = np.array(baselines)
-        ig.add_item(0x100C, 'bls_ordering', "The X-engine baseline output ordering. The form is a list of arrays of strings of user-defined antenna names ('input1','input2'). For example [('antC23x','antC23y'), ('antB12y','antA29y')]",
-            baselines.shape, baselines.dtype, value=baselines)
-
-        self.add_input_labelling_item(ig)
-        return ig
-
-    def _make_ig_data(self):
-        ig = spead2.send.ItemGroup(flavour=self._flavour)
-        self.add_timestamp_item(ig)
-        self.add_frequency_item(ig)
-        # flags_xeng_raw is still TBD in the ICD, so omitted for now
-        ig.add_item(0x1800, 'xeng_raw', 'Raw data stream from all the X-engines in the system. For KAT-7, this item represents a full spectrum (all frequency channels) assembled from lowest frequency to highest frequency. Each frequency channel contains the data for all baselines (n_bls given by SPEAD Id=0x1008). Each value is a complex number - two (real and imaginary) signed integers.',
-            (self.product.n_channels // self.n_streams, self.product.n_baselines * 4, 2), np.int32)
-        return ig
-
-    @trollius.coroutine
-    def _send_metadata_stream(self, endpoint_idx):
-        # Send just once for all the streams sending to the same endpoint,
-        # using the first corresponding stream
-        stream_idx = endpoint_idx * self.n_streams // self.n_endpoints
-        stream = self._streams[stream_idx]
-        heap = self._ig_static[endpoint_idx].get_heap(descriptors='all', data='all')
-        yield From(stream.async_send_heap(heap))
-        heap = self._ig_gain.get_heap(descriptors='all', data='all')
-        yield From(stream.async_send_heap(heap))
-        heap = self._ig_labels.get_heap(descriptors='all', data='all')
-        yield From(stream.async_send_heap(heap))
-        heap = self._ig_data[stream_idx].get_heap(descriptors='all', data='none')
-        yield From(stream.async_send_heap(heap))
-        yield From(stream.async_send_heap(self._ig_static[endpoint_idx].get_start()))
-
-    @trollius.coroutine
-    def send_metadata(self):
-        """Reissue all the metadata on the streams."""
-        futures = []
-        # Send on all streams in parallel
-        for i in range(self.n_endpoints):
-            futures.append(trollius.async(self._send_metadata_stream(i)))
-        for future in futures:
-            yield From(future)
-
-    @trollius.coroutine
-    def send(self, vis, dump_index):
-        assert vis.flags.c_contiguous, 'Visibility array must be contiguous'
-        shape = (self.product.n_channels, self.product.n_baselines * 4, 2)
-        stream_channels = self.product.n_channels // self.n_streams
-        vis_view = vis.reshape(*shape)
-        futures = []
-        timestamp = dump_index * self.product.n_accs * self.product.n_channels * self.scale_factor_timestamp // self.product.bandwidth
-        # Truncate timestamp to the width of the field it is in
-        timestamp = timestamp & ((1 << self._flavour.heap_address_bits) - 1)
-        for i, stream in enumerate(self._streams):
-            channel0 = stream_channels * i
-            channel1 = channel0 + stream_channels
-            self._ig_data[i]['xeng_raw'].value = vis_view[channel0:channel1]
-            self._ig_data[i]['timestamp'].value = timestamp
-            self._ig_data[i]['frequency'].value = channel0
-            heap = self._ig_data[i].get_heap()
-            futures.append(trollius.async(stream.async_send_heap(heap)))
-        for future in futures:
-            yield From(future)
-
-
-class FileStream(object):
-    """Base class for file-sink streams, providing a factory function."""
-    @classmethod
-    def factory(cls, filename):
-        return functools.partial(cls, filename)
-
-    def __init__(self, filename, product):
-        self._product = product
-        self._file = h5py.File(filename, 'w')
-
-    @trollius.coroutine
-    def close(self):
-        self._file.close()
-
-
-class FXStreamFile(FileStream):
-    """Writes data to HDF5 file. This is just the raw visibilities, and is not
-    katdal-compatible."""
-    def __init__(self, filename, product):
-        super(FXStreamFile, self).__init__(filename, product)
-        self._dataset = self._file.create_dataset('correlator_data',
-            (0, product.n_channels, product.n_baselines * 4, 2), dtype=np.int32,
-            maxshape=(None, product.n_channels, product.n_baselines * 4, 2))
-        self._flags = None
-
-    @trollius.coroutine
-    def send_metadata(self):
-        pass
-
-    @trollius.coroutine
-    def send(self, vis, dump_index):
-        vis = vis.reshape((vis.shape[0], vis.shape[1] * 4, 2))
-        self._dataset.resize(dump_index + 1, axis=0)
-        self._dataset[dump_index : dump_index + 1, ...] = vis[np.newaxis, ...]
-
-
-#############################################################################
-
-class BeamformerStreamSpead(CBFSpeadStream):
-    """Data stream from a beamformer, sent over SPEAD."""
-    def __init__(self, endpoints, n_streams, product):
-        if product.wall_interval == 0:
-            in_rate = 0
+    def __init__(self, subarray, name, loop=None):
+        self._capture_future = None
+        self._stop_future = None
+        self.name = name
+        self.subarray = subarray
+        self.transport_factory = None
+        if loop is None:
+            self._loop = trollius.get_event_loop()
         else:
-            in_rate = product.n_channels * product.timesteps * 2 * product.sample_bits / product.wall_interval / 8
-        super(BeamformerStreamSpead, self).__init__(endpoints, n_streams, product, in_rate)
-        self.xeng_acc_len = self.product.timesteps
-        self._ig_static = [self._make_ig_static(i) for i in range(self.n_endpoints)]
-        self._ig_weights = self._make_ig_weights()
-        self._ig_labels = self._make_ig_labels()
-        self._ig_timing = self._make_ig_timing()
-        self._ig_data = [self._make_ig_data() for i in range(self.n_streams)]
+            self._loop = loop
 
-    def _make_ig_static(self, endpoint_idx):
-        ig = spead2.send.ItemGroup(flavour=self._flavour)
-        self.add_adc_sample_rate_item(ig)
-        self.add_n_chans_item(ig)
-        self.add_n_ants_item(ig)
-        ig.add_item(0x100F, 'n_bengs', 'The total number of B engines in a beamformer system.',
-            (), format=self._inline_format, value=self.n_streams)
-        self.add_center_freq_item(ig)
-        self.add_bandwidth_item(ig)
-        self.add_xeng_acc_len_item(ig)
-        self.add_requant_bits_item(ig)
-        self.add_fft_shift_item(ig)
-        # ICD strongly implies that feng_pkt_len is the same as xeng_acc_len
-        ig.add_item(0x1021, 'feng_pkt_len', 'Payload size of packet exchange between F and X engines in 64 bit words. Usually equal to the number of spectra accumulated inside X engine. F-engine correlator internals.',
-            (), format=self._inline_format, value=self.xeng_acc_len)
-        # ddc_mix_freq omitted, since the correct value isn't known
-        # ig.add_item(0x1043, 'ddc_mix_freq', 'Digital downconverter mixing frequency as a fraction of the ADC sampling frequency. eg: 0.25. Set to zero if no DDC is present.',
-        #     (), format=[('f', 64)], value=0.0)
-        self.add_adc_bits_item(ig)
-        self.add_ticks_between_spectra_item(ig)
-        self.add_rx_udp_items(ig, endpoint_idx)
-        ig.add_item(0x1050, 'beng_out_bits_per_sample', 'The number of bits per value of the beng accumulator output. Note this is for a single component value, not the combined complex size.',
-            (), format=self._inline_format, value=self.product.sample_bits)
-        return ig
+    def __setattr__(self, key, value):
+        # Prevent modifications while capture is in progress
+        if not key.startswith('_') and self.capturing:
+            raise CaptureInProgressError('cannot set {} while capture is in progress'.format(key))
+        return super(Stream, self).__setattr__(key, value)
 
-    def _make_ig_weights(self):
-        ig = spead2.send.ItemGroup(flavour=self._flavour)
-        self.add_eq_coef_items(ig)
-        beamweight = np.zeros((2 * self.product.n_antennas,), np.int32)
-        ig.add_item(0x2000, 'beamweight', 'The unitless digital scaling factors implemented prior to combining signals for this beam. See 0x100E (input_labelling) to get mapping from inputN to user defined input string.',
-            beamweight.shape, beamweight.dtype, value=beamweight)
-        return ig
+    @property
+    def n_antennas(self):
+        return len(self.subarray.antennas)
 
-    def _make_ig_labels(self):
-        ig = spead2.send.ItemGroup(flavour=self._flavour)
-        self.add_input_labelling_item(ig)
-        return ig
+    @property
+    def n_baselines(self):
+        n = self.n_antennas
+        return n * (n + 1) // 2
 
-    def _make_ig_timing(self):
-        ig = spead2.send.ItemGroup(flavour=self._flavour)
-        self.add_scale_factor_timestamp_item(ig)
-        self.add_sync_time_item(ig)
-        return ig
+    @property
+    def capturing(self):
+        return self._capture_future is not None
 
-    def _make_ig_data(self):
-        ig = spead2.send.ItemGroup(flavour=self._flavour)
-        self.add_timestamp_item(ig)
-        self.add_frequency_item(ig)
-        ig.add_item(0x5000, 'bf_raw', 'Beamformer output for frequency-domain beam. User-defined name (out of band control). Record length depending on number of frequency channels and F-X packet size (xeng_acc_len).',
-            shape=(self.product.n_channels // self.n_streams, self.product.timesteps, 2), dtype=self.product.dtype)
-        return ig
+    def capture_start(self):
+        """Begin capturing data, if it has not been done already. The
+        capturing is done on the trollius event loop, which must thus be
+        allowed to run frequency to ensure timeous delivery of results.
+
+        Subclasses may override this to provide consistency checks on the
+        state. They must also provide the :meth:`_capture` coroutine.
+
+        Raises
+        ------
+        IncompleteConfigError
+            if no destination is defined
+        """
+        if self.capturing:
+            logger.warn('Ignoring attempt to start capture when already running')
+            return
+        if self.transport_factory is None:
+            raise IncompleteConfigError('no destination specified')
+        self.subarray.capturing += 1
+        # Create a future that is set by capture_stop
+        self._stop_future = trollius.Future(loop=self._loop)
+        # Start the capture coroutine on the event loop
+        self._capture_future = trollius.async(self._capture(), loop=self._loop)
 
     @trollius.coroutine
-    def _send_metadata_stream(self, endpoint_idx):
-        """Reissue all the metadata on the stream (for one endpoint)."""
-        stream_idx = endpoint_idx * self.n_streams // self.n_endpoints
-        stream = self._streams[stream_idx]
-        heap = self._ig_timing.get_heap(descriptors='all', data='all')
-        yield From(stream.async_send_heap(heap))
-        heap = self._ig_weights.get_heap(descriptors='all', data='all')
-        yield From(stream.async_send_heap(heap))
-        heap = self._ig_static[endpoint_idx].get_heap(descriptors='all', data='all')
-        yield From(stream.async_send_heap(heap))
-        heap = self._ig_labels.get_heap(descriptors='all', data='all')
-        yield From(stream.async_send_heap(heap))
-        heap = self._ig_data[stream_idx].get_heap(descriptors='all', data='none')
-        yield From(stream.async_send_heap(heap))
-        yield From(stream.async_send_heap(self._ig_static[endpoint_idx].get_start()))
+    def capture_stop(self):
+        """Request an end to data capture, and wait for capture to complete.
+        This is a coroutine.
+        """
+        if not self.capturing:
+            logger.warn('Ignoring attempt to stop capture when not running')
+            return
+        # Need to check if a result has been set to protect against concurrent
+        # stops.
+        if not self._stop_future.done():
+            self._stop_future.set_result(None)
+        yield From(self._capture_future)
+        self._stop_future = None
+        self._capture_future = None
+        self.subarray.capturing -= 1
 
     @trollius.coroutine
-    def send_metadata(self):
-        """Reissue all the metadata on the streams."""
-        futures = []
-        # Send on all streams in parallel
-        for i in range(self.n_endpoints):
-            futures.append(trollius.async(self._send_metadata_stream(i)))
-        for future in futures:
-            yield From(future)
+    def wait_for_next(self, wall_time):
+        """Utility function for subclasses to managing timing. It will wait
+        until either `wall_time` is reached, or :meth:`capture_stop` has been
+        called. It also warns if `wall_time` has already passed.
+
+        Parameters
+        ----------
+        wall_time : float
+            Loop timestamp at which to stop
+
+        Returns
+        -------
+        stopped : bool
+            If true, then :meth:`capture_stop` was called.
+        """
+        try:
+            now = self._loop.time()
+            if now > wall_time:
+                logger.warn('Falling behind the requested rate by %f seconds', now - wall_time)
+            else:
+                logger.debug('Sleeping for %f seconds', wall_time - now)
+            yield From(resource.wait_until(trollius.shield(self._stop_future), wall_time, self._loop))
+        except trollius.TimeoutError:
+            # This is the normal case: time for the next dump to be transmitted
+            stopped = False
+        else:
+            # The _stop_future was triggered
+            stopped = True
+        raise Return(stopped)
+
+
+class CBFStream(Stream):
+    """Parts that are shared between :class:`FXStream` and :class:`BeamformerStream`.
+
+    Parameters
+    ----------
+    subarray : :class:`Subarray`
+        Subarray corresponding to this stream
+    name : str
+        Name for this stream (used by katcp)
+    adc_rate : int
+        Simulated ADC clock rate, in Hz
+    center_frequency : int
+        Sky frequency of the center of the band, in Hz
+    bandwidth : int
+        Bandwidth of all channels in the stream, in Hz
+    n_channels : int
+        Number of channels in the stream
+    loop : :class:`trollius.BaseEventLoop`, optional
+        Event loop for coroutines
+
+    Attributes
+    ----------
+    adc_rate : int
+        Simulated ADC clock rate, in Hz
+    center_frequency : int
+        Sky frequency of the center of the band, in Hz
+    bandwidth : int
+        Bandwidth of all channels in the stream, in Hz
+    n_channels : int
+        Number of channels in the stream
+    n_dumps : int
+        If not ``None``, limits the number of dumps that will be done
+    """
+    def __init__(self, subarray, name, adc_rate, center_frequency, bandwidth,
+                 n_channels, loop=None):
+        super(CBFStream, self).__init__(subarray, name, loop)
+        self.adc_rate = adc_rate
+        self.center_frequency = center_frequency
+        self.bandwidth = bandwidth
+        self.n_channels = n_channels
+        self.n_dumps = None
+
+
+class FXStream(CBFStream):
+    """Simulation of a correlation stream.
+
+    Parameters
+    ----------
+    context : katsdpsigproc context
+        Device context
+    subarray : :class:`Subarray`
+        Subarray corresponding to this stream
+    name : str
+        Name for this stream (used by katcp)
+    adc_rate : int
+        Simulated ADC clock rate, in Hz
+    center_frequency : int
+        Sky frequency of the center of the band, in Hz
+    bandwidth : int
+        Bandwidth of all channels in the stream, in Hz
+    n_channels : int
+        Number of channels in the stream
+    loop : :class:`trollius.BaseEventLoop`, optional
+        Event loop for coroutines
+
+    Attributes
+    ----------
+    context : katsdpsigproc context
+        Device context
+    accumulation_length : float
+        Simulated integration time in seconds. This is a property: setting the
+        value will round it to the nearest supported value.
+    wall_accumulation_length : float, read-only
+        Minimum wall-clock time between emitting dumps. This is determined by
+        :attr:`accumulation_length` and :attr:`Subarray.clock_ratio`.
+    n_accs : int, read-only
+        Number of simulated accumulations per output dump. This is set
+        indirectly by writing to :attr:`accumulation_length`.
+    """
+    def __init__(self, context, subarray, name, adc_rate,
+                 center_frequency, bandwidth, n_channels, loop=None):
+        super(FXStream, self).__init__(subarray, name, adc_rate, center_frequency, bandwidth,
+                                        n_channels, loop)
+        self.context = context
+        self.accumulation_length = 0.5
+        self.sefd = 400.0   # Jansky
+        self.seed = 1
+
+    @property
+    def wall_accumulation_length(self):
+        return self.subarray.clock_ratio * self.accumulation_length
+
+    @property
+    def accumulation_length(self):
+        """Integration time in seconds. This is a property: setting the value
+        will round it to the nearest supported value.
+        """
+        return self._accumulation_length
+
+    @accumulation_length.setter
+    def accumulation_length(self, value):
+        # Round the accumulation length in the same way the real correlator
+        # would. It requires a multiple of 256 accumulations.
+        snap_length = self.n_channels / self.bandwidth
+        self._n_accs = int(round(value / snap_length / 256)) * 256
+        self._accumulation_length = snap_length * self.n_accs
+
+    @property
+    def n_accs(self):
+        return self._n_accs
+
+    def capture_start(self):
+        """Begin capturing data, if it has not been done already.
+
+        If no sources are defined, one is added at the phase center.
+
+        Raises
+        ------
+        IncompleteConfigError
+            if the subarray has no antennas, or no target
+        IncompleteConfigError
+            if no destination is defined
+        """
+        if not self.subarray.antennas:
+            raise IncompleteConfigError('no antennas defined')
+        if self.transport_factory is None:
+            raise IncompleteConfigError('no destination specified')
+        if self.subarray.target_at(self.subarray.sync_time) is None:
+            raise IncompleteConfigError('no target set')
+        self.subarray.ensure_source(self.subarray.sync_time)
+        super(FXStream, self).capture_start()
+
+    def _make_predict(self):
+        """Compiles the kernel, allocates memory etc. This is potentially slow,
+        so it is run in a separate thread to avoid blocking the event loop.
+
+        Returns
+        -------
+        predict : :class:`~katcbfsim.rime.Rime`
+            Visibility predictor
+        data : list of :class:`~katsdpsigproc.accel.DeviceArray`
+            Device storage for visibilities
+        host : list of :class:`~katsdpsigproc.accel.HostArray`
+            Pinned memory for transfers to the host
+        """
+        queue = self.context.create_command_queue()
+        template = rime.RimeTemplate(self.context, len(self.subarray.antennas))
+        predict = template.instantiate(
+            queue, self.center_frequency, self.bandwidth,
+            self.n_channels, self.n_accs,
+            self.subarray.sources, self.subarray.antennas,
+            self.sefd, self.seed, async=True)
+        predict.ensure_all_bound()
+        # Initialise gains. Eventually this will need to be more sophisticated, but
+        # for now it is just real and diagonal.
+        gain_host = predict.buffer('gain').empty_like()
+        gain_host.fill(0)
+        baseline_gain = self.subarray.gain * self.bandwidth / self.n_channels * self.accumulation_length
+        antenna_gain = math.sqrt(baseline_gain)
+        gain_host[:, :, 0, 0].fill(antenna_gain)
+        gain_host[:, :, 1, 1].fill(antenna_gain)
+        predict.buffer('gain').set(predict.command_queue, gain_host)
+        data = [predict.buffer('out')]
+        data.append(accel.DeviceArray(self.context, data[0].shape, data[0].dtype, data[0].padded_shape))
+        host = [x.empty_like() for x in data]
+        return predict, data, host
 
     @trollius.coroutine
-    def send(self, beam_data, index):
-        stream_channels = self.product.n_channels // self.n_streams
-        timestamp = index * self.product.timesteps * self.product.n_channels * self.scale_factor_timestamp // self.product.bandwidth
-        # Truncate timestamp to the width of the field it is in
-        timestamp = timestamp & ((1 << self._flavour.heap_address_bits) - 1)
-        futures = []
-        for i, stream in enumerate(self._streams):
-            channel0 = stream_channels * i
-            channel1 = channel0 + stream_channels
-            self._ig_data[i]['bf_raw'].value = beam_data[channel0:channel1]
-            self._ig_data[i]['timestamp'].value = timestamp
-            heap = self._ig_data[i].get_heap()
-            futures.append(stream.async_send_heap(heap))
-        for future in futures:
-            yield From(future)
+    def _run_dump(self, index, predict_a, data_a, host_a, stream_a, io_queue_a):
+        """Coroutine that does all the processing for a single dump. More than
+        one of these will be active at a time, and they use
+        :class:`katsdpsigproc.resource.Resource` to avoid data hazards and to
+        prevent out-of-order execution.
+        """
+        try:
+            with predict_a as predict, data_a as data, host_a as host, \
+                    stream_a as stream, io_queue_a as io_queue:
+                # Prepare the predictor object.
+                # No need to wait for events on predict, because the object has its own
+                # command queue to serialise use.
+                yield From(predict_a.wait())
+                predict.bind(out=data)
+                dump_start_time = self.subarray.sync_time + index * self.accumulation_length
+                # Set the timestamp for the center of the integration period
+                dump_center_time = dump_start_time + 0.5 * self.accumulation_length
+                predict.set_time(dump_center_time)
+                predict.set_phase_center(self.subarray.target_at(dump_start_time))
+                predict.set_position(self.subarray.position_at(dump_start_time))
+
+                # Execute the predictor, updating data
+                logger.debug('Dump %d: waiting for device memory event', index)
+                events = yield From(data_a.wait())
+                logger.debug('Dump %d: device memory wait event found', index)
+                predict.command_queue.enqueue_wait_for_events(events)
+                logger.debug('Dump %d: device memory wait queued', index)
+                predict_ready_event = predict()
+                logger.debug('Dump %d: kernel queued', index)
+                compute_event = predict.command_queue.enqueue_marker()
+                predict.command_queue.flush()
+                logger.debug('Dump %d: kernel flushed', index)
+                predict_a.ready([predict_ready_event])   # Predict object can be reused now
+                logger.debug('Dump %d: operation enqueued, waiting for host memory', index)
+
+                # Transfer the data back to the host
+                yield From(io_queue_a.wait()) # Just to ensure ordering - no data hazards
+                yield From(host_a.wait())
+                io_queue.enqueue_wait_for_events([compute_event])
+                data.get_async(io_queue, host)
+                io_queue.flush()
+                logger.debug('Dump %d: transfer to host queued', index)
+                transfer_event = io_queue.enqueue_marker()
+                data_a.ready([transfer_event])
+                io_queue_a.ready()
+                # Wait for the transfer to complete
+                yield From(resource.async_wait_for_events([transfer_event], loop=self._loop))
+                logger.debug('Dump %d: transfer to host complete, waiting for stream', index)
+
+                # Send the data
+                yield From(stream_a.wait())        # Just to ensure ordering
+                logger.debug('Dump %d: starting transmission', index)
+                yield From(stream.send(host, index))
+                host_a.ready()
+                stream_a.ready()
+                logger.debug('Dump %d: complete', index)
+        except Exception:
+            logging.error('Dump %d: exception', index, exc_info=True)
+
+    @trollius.coroutine
+    def _capture(self):
+        """Capture co-routine, started by :meth:`capture_start` and joined by
+        :meth:`capture_stop`.
+        """
+        # Futures corresponding to _run_dump coroutine calls
+        dump_futures = collections.deque()
+        transport = None
+        try:
+            transport = self.transport_factory(self)
+            yield From(transport.send_metadata())
+            predict, data, host = yield From(self._loop.run_in_executor(None, self._make_predict))
+            index = 0
+            predict_r = resource.Resource(predict, loop=self._loop)
+            io_queue_r = resource.Resource(self.context.create_command_queue(), loop=self._loop)
+            data_r = [resource.Resource(x, loop=self._loop) for x in data]
+            host_r = [resource.Resource(x, loop=self._loop) for x in host]
+            stream_r = resource.Resource(transport, loop=self._loop)
+            wall_time = self._loop.time()
+            while self.n_dumps is None or index < self.n_dumps:
+                predict_a = predict_r.acquire()
+                data_a = data_r[index % len(data_r)].acquire()
+                host_a = host_r[index % len(host_r)].acquire()
+                stream_a = stream_r.acquire()
+                io_queue_a = io_queue_r.acquire()
+                # Don't start the dump coroutine until the predictor is ready.
+                # This ensures that if dumps can't keep up with the rate, then
+                # we will block here rather than building an ever-growing set
+                # of active coroutines.
+                logger.debug('Dump %d: waiting for predictor', index)
+                yield From(predict_a.wait_events())
+                logger.debug('Dump %d: predictor ready', index)
+                future = trollius.async(
+                    self._run_dump(index, predict_a, data_a, host_a, stream_a, io_queue_a),
+                    loop=self._loop)
+                dump_futures.append(future)
+                # Sleep until either it is time to make the next dump, or we are asked
+                # to stop.
+                wall_time += self.wall_accumulation_length
+                stopped = yield From(self.wait_for_next(wall_time))
+                if stopped:
+                    break
+                # Reap any previously completed coroutines
+                while dump_futures and dump_futures[0].done():
+                    dump_futures[0].result()  # Re-throws exceptions here
+                    dump_futures.popleft()
+                index += 1
+            logging.info('Stop requested, waiting for in-flight dumps...')
+            while dump_futures:
+                yield From(dump_futures[0])
+                dump_futures.popleft()
+            logging.info('Capture stopped by request')
+            yield From(transport.close())
+        except Exception:
+            logger.error('Exception in capture coroutine', exc_info=True)
+            for future in dump_futures:
+                if not future.done():
+                    future.cancel()
+            if transport is not None:
+                yield From(transport.close())
+
+
+class BeamformerStream(CBFStream):
+    """Simulated beam-former. The individual antennas are not simulated, but
+    are still used to provide input labelling.
+
+    Parameters
+    ----------
+    subarray : :class:`Subarray`
+        Subarray corresponding to this stream
+    name : str
+        Name for this stream (used by katcp)
+    adc_rate : int
+        Simulated ADC clock rate, in Hz
+    center_frequency : int
+        Sky frequency of the center of the band, in Hz
+    bandwidth : int
+        Bandwidth of all channels in the stream, in Hz
+    n_channels : int
+        Number of channels in the stream
+    timesteps : int
+        Number of samples in time accumulated into a single update. This is
+        used by :class:`BeamformerStreamSpead` to decide the data shape.
+    sample_bits : int
+        Number of bits per output sample (for each of real and imag). Currently
+        this must be 8, 16 or 32.
+    loop : :class:`trollius.BaseEventLoop`, optional
+        Event loop for coroutines
+
+    Attributes
+    ----------
+    timesteps : int
+        Number of samples in time accumulated into a single update. This is
+        used by :class:`BeamformerStreamSpead` to decide the data shape.
+    sample_bits : int
+        Number of bits per output sample (for each of real and imag). Currently
+        this must be 8, 16 or 32.
+    dtype : numpy data type
+        Data type corresponding to :attr:`sample_bits`
+    interval : float
+        Seconds between output dumps, in simulation time
+    wall_interval : float
+        Equivalent to :attr:`interval`, but in wall-clock time
+    """
+    def __init__(self, subarray, name, adc_rate, center_frequency, bandwidth,
+                 n_channels, timesteps, sample_bits, loop=None):
+        super(BeamformerStream, self).__init__(
+                subarray, name, adc_rate, center_frequency, bandwidth, n_channels, loop)
+        self.timesteps = timesteps
+        self.sample_bits = sample_bits
+        if sample_bits == 8:
+            self.dtype = np.int8
+        elif sample_bits == 16:
+            self.dtype = np.int16
+        elif sample_bits == 32:
+            self.dtype = np.int32
+        else:
+            raise ValueError('sample_bits must be 8, 16 or 32')
+
+    @property
+    def interval(self):
+        return self.timesteps * self.n_channels / self.bandwidth
+
+    @property
+    def wall_interval(self):
+        return self.subarray.clock_ratio * self.interval
+
+    @trollius.coroutine
+    def _run_dump(self, transport, index):
+        data = np.zeros((self.n_channels, self.timesteps, 2), self.dtype)
+        # Stuff in some patterned values to help test decoding
+        for i in range(self.timesteps):
+            value = index * self.timesteps + i
+            data[value % self.n_channels, value % self.timesteps, 0] = value & 0x7f
+            data[value % self.n_channels, value % self.timesteps, 1] = (value >> 15) & 0x7f
+        yield From(transport.send(data, index))
+
+    @trollius.coroutine
+    def _capture(self):
+        """Capture co-routine, started by :meth:`capture_start` and joined by
+        :meth:`capture_stop`.
+        """
+        transport = None
+        dump_futures = collections.deque()
+        try:
+            transport = self.transport_factory(self)
+            yield From(transport.send_metadata())
+            index = 0
+            wall_time = self._loop.time()
+            while self.n_dumps is None or index < self.n_dumps:
+                while len(dump_futures) > 3:
+                    yield From(dump_futures[0])
+                    dump_futures.popleft()
+                future = trollius.async(
+                    self._run_dump(transport, index), loop=self._loop)
+                dump_futures.append(future)
+                wall_time += self.wall_interval
+                stopped = yield From(self.wait_for_next(wall_time))
+                if stopped:
+                    break
+                # Reap any previously completed coroutines
+                while dump_futures and dump_futures[0].done():
+                    dump_futures[0].result()  # Re-throws exceptions here
+                    dump_futures.popleft()
+                index += 1
+            logging.info('Stop requested, waiting for in-flight dumps...')
+            while dump_futures:
+                yield From(dump_futures[0])
+                dump_futures.popleft()
+            logging.info('Capture stopped by request')
+            yield From(transport.close())
+        except Exception:
+            logger.error('Exception in capture coroutine', exc_info=True)
+            if transport is not None:
+                yield From(transport.close())
