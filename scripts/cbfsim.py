@@ -11,7 +11,7 @@ import argparse
 import logging
 import time
 import katcbfsim.server
-from katcbfsim.product import FXProduct, Subarray
+from katcbfsim.stream import Subarray
 from katsdpsigproc import accel
 import katsdptelstate
 import katpoint
@@ -84,25 +84,27 @@ def prepare_server(server, args):
     server.set_gain(args.cbf_sim_gain)
     if args.cbf_target is not None:
         server.set_target(katpoint.Target(args.cbf_target))
-    if args.create_fx_product is not None:
-        product = server.add_fx_product(args.create_fx_product,
+    if args.create_fx_stream is not None:
+        stream = server.add_fx_stream(
+            args.create_fx_stream,
             args.cbf_adc_sample_rate, args.cbf_center_freq, args.cbf_bandwidth,
             args.cbf_channels)
-        server.set_accumulation_length(product, args.cbf_int_time)
-        server.set_destination(product, args.cbf_spead, args.cbf_streams)
+        server.set_accumulation_length(stream, args.cbf_int_time)
+        server.set_destination(stream, args.cbf_spead, args.cbf_substreams)
         if args.dumps:
-            server.set_n_dumps(product, args.dumps)
+            server.set_n_dumps(stream, args.dumps)
         if args.start:
-            server.capture_start(product)
-    if args.create_beamformer_product is not None:
-        product = server.add_beamformer_product(args.create_beamformer_product,
+            server.capture_start(stream)
+    if args.create_beamformer_stream is not None:
+        stream = server.add_beamformer_stream(
+            args.create_beamformer_stream,
             args.cbf_adc_sample_rate, args.cbf_center_freq, args.cbf_bandwidth,
             args.cbf_channels, args.beamformer_timesteps, args.beamformer_bits)
-        server.set_destination(product, args.cbf_spead, args.cbf_streams)
+        server.set_destination(stream, args.cbf_spead, args.cbf_substreams)
         if args.dumps:
-            server.set_n_dumps(product, args.dumps)
+            server.set_n_dumps(stream, args.dumps)
         if args.start:
-            server.capture_start(product)
+            server.capture_start(stream)
     if args.telstate is not None:
         # Consumers may wait for cam2telstate to set its status to 'ready'
         # before fetching attributes.
@@ -122,10 +124,10 @@ def configure_logging(level):
 def main():
     parser = katsdptelstate.ArgumentParser()
     group = parser.add_mutually_exclusive_group()
-    group.add_argument('--create-fx-product', type=str, metavar='NAME', help='Create a correlator product without prompting from katcp')
-    group.add_argument('--create-beamformer-product', type=str, metavar='NAME', help='Create a beamformer product without prompting from katcp')
-    parser.add_argument('--start', action='store_true', help='Start the defined products')
-    parser.add_argument('--dumps', type=int, help='Set finite number of dumps to produce for pre-configured products [infinite]')
+    group.add_argument('--create-fx-stream', type=str, metavar='NAME', help='Create a correlator stream without prompting from katcp')
+    group.add_argument('--create-beamformer-stream', type=str, metavar='NAME', help='Create a beamformer stream without prompting from katcp')
+    parser.add_argument('--start', action='store_true', help='Start the defined streams')
+    parser.add_argument('--dumps', type=int, help='Set finite number of dumps to produce for pre-configured streams [infinite]')
     parser.add_argument('--cbf-channels', type=int, default=32768, metavar='N', help='Number of channels [%(default)s]')
     parser.add_argument('--cbf-adc-sample-rate', type=int, default=1712000000, metavar='HZ', help='ADC rate [%(default)s]'),
     parser.add_argument('--cbf-bandwidth', type=int, default=856000000, metavar='HZ', help='Bandwidth [%(default)s]')
@@ -133,7 +135,7 @@ def main():
     parser.add_argument('--cbf-spead', type=katsdptelstate.endpoint.endpoint_list_parser(7148), metavar='ENDPOINT', default='127.0.0.1:7148', help='destination for CBF output [%(default)s]')
     parser.add_argument('--cbf-sync-time', type=int, metavar='TIME', help='Sync time as UNIX timestamp [now]')
     parser.add_argument('--cbf-int-time', type=float, metavar='TIME', default=0.5, help='Integration time in seconds [%(default)s]')
-    parser.add_argument('--cbf-streams', type=int, metavar='N', help='Number of streams (X/B-engines) in simulated CBF [auto]')
+    parser.add_argument('--cbf-substreams', type=int, metavar='N', help='Number of substreams (X/B-engines) in simulated CBF [auto]')
     parser.add_argument('--cbf-antenna', dest='cbf_antennas', type=parse_antenna, action='append', default=[], metavar='DESCRIPTION', help='Specify an antenna (can be used multiple times)')
     parser.add_argument('--cbf-antenna-file', metavar='FILE', help='Load antenna descriptions from file, one per line')
     parser.add_argument('--cbf-sim-source', dest='cbf_sim_sources', type=parse_source, action='append', default=[], metavar='DESCRIPTION', help='Specify a source object (can be used multiple times)')
@@ -147,8 +149,8 @@ def main():
     parser.add_argument('--host', '-a', type=str, default='', help='katcp host address [all hosts]')
     parser.add_argument('--log-level', '-l', default='INFO', help='logging level [%(default)s]')
     args = parser.parse_args()
-    if args.start and args.create_fx_product is None and args.create_beamformer_product is None:
-        parser.error('--start requires --create-fx-product or --create-beamformer-product')
+    if args.start and args.create_fx_stream is None and args.create_beamformer_stream is None:
+        parser.error('--start requires --create-fx-stream or --create-beamformer-stream')
     configure_logging(args.log_level)
 
     try:

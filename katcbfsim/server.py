@@ -9,35 +9,38 @@ import functools
 from katcp import Sensor
 from katcp.kattypes import Str, Float, Int, Address, request, return_reply
 from katsdptelstate import endpoint
-from . import product, stream
-from .product import Subarray, FXProduct, BeamformerProduct
-
+import katcbfsim
+from . import transport
+from .stream import (Subarray, FXStream, BeamformerStream,
+                     CaptureInProgressError, IncompleteConfigError, UnsupportedStreamError)
 
 logger = logging.getLogger(__name__)
 
 
-def _product_request(wrapped):
-    """Decorator for per-product commands. It looks up the product and passes
+def _stream_request(wrapped):
+    """Decorator for per-stream commands. It looks up the stream and passes
     it to the wrapped function, or returns a failure message if it does not
     exist.
     """
     @functools.wraps(wrapped)
     def wrapper(self, sock, name, *args, **kwargs):
         try:
-            product = self._products[name]
+            stream = self._streams[name]
         except KeyError:
-            return 'fail', 'requested product name "{}" not found'.format(name)
-        return wrapped(self, sock, product, *args, **kwargs)
+            return 'fail', 'requested stream name "{}" not found'.format(name)
+        return wrapped(self, sock, stream, *args, **kwargs)
     return wrapper
 
-def _product_exceptions(wrapped):
+def _stream_exceptions(wrapped):
     """Decorator used on requests that and turns exceptions defined in
-    :py:mod:`product` into katcp "fail" messages.
+    :py:mod:`stream` into katcp "fail" messages.
     """
     def wrapper(*args, **kwargs):
         try:
             return wrapped(*args, **kwargs)
-        except (product.CaptureInProgressError, product.IncompleteConfigError, product.UnsupportedProductError) as e:
+        except (CaptureInProgressError,
+                IncompleteConfigError,
+                UnsupportedStreamError) as e:
             return 'fail', str(e)
     functools.update_wrapper(wrapper, wrapped)
     return wrapper
@@ -50,29 +53,29 @@ class SimulatorServer(katcp.DeviceServer):
     ----------
     context : compute device context, optional
         Compute device context used for device-accelerated simulations
-    subarray : :class:`katcbfsim.product.Subarray`, optional
+    subarray : :class:`katcbfsim.stream.Subarray`, optional
         Preconfigured subarray. If not specified, an unconfigured subarray is created.
     telstate : :class:`katsdptelstate.TelescopeState`, optional
         Telescope state used for the :samp:`?configure-subarray-from-telstate`.
-        If not provided, that require will fail.
+        If not provided, that request will fail.
     *args, **kwargs :
         Passed to base class
     """
 
-    VERSION_INFO = ('katcbfsim-api', 1, 0)
-    BUILD_INFO = ('katcbfsim', 0, 1, '')
+    VERSION_INFO = ('katcbfsim-api', 2, 0)
+    BUILD_INFO = ('katcbfsim',) + tuple(katcbfsim.__version__.split('.', 1)) + ('',)
 
     def __init__(self, context=None, subarray=None, telstate=None, *args, **kwargs):
         super(SimulatorServer, self).__init__(*args, **kwargs)
         self._context = context
-        self._products = {}
+        self._streams = {}
         if subarray is None:
             self._subarray = Subarray()
         else:
             self._subarray = subarray
         self._telstate = telstate
-        #: Dictionary of dictionaries, indexed by product then sensor name
-        self._product_sensors = {}
+        #: Dictionary of dictionaries, indexed by stream then sensor name
+        self._stream_sensors = {}
         #: Set when halt is called
         self._halting = False
 
@@ -81,122 +84,122 @@ class SimulatorServer(katcp.DeviceServer):
             'Dummy device status sensor. The simulator is always ok.',
             '', ['ok', 'degraded', 'fail'], initial_status=Sensor.NOMINAL))
 
-    def _add_product(self, product):
-        assert product.name not in self._products
-        self._products[product.name] = product
-        self._product_sensors[product] = {
-            'bandwidth': Sensor.integer('{}.bandwidth'.format(product.name),
-                'The bandwidth currently configured for the data product',
-                'Hz', default=product.bandwidth, initial_status=Sensor.NOMINAL),
-            'channels': Sensor.integer('{}.channels'.format(product.name),
-                'The number of channels of the channelised data product',
-                '', default=product.n_channels, initial_status=Sensor.NOMINAL),
-            'centerfrequency': Sensor.integer('{}.centerfrequency'.format(product.name),
-                'The center frequency for the data product', 'Hz')
+    def _add_stream(self, stream):
+        assert stream.name not in self._streams
+        self._streams[stream.name] = stream
+        self._stream_sensors[stream] = {
+            'bandwidth': Sensor.integer('{}.bandwidth'.format(stream.name),
+                'The bandwidth currently configured for the data stream',
+                'Hz', default=stream.bandwidth, initial_status=Sensor.NOMINAL),
+            'channels': Sensor.integer('{}.channels'.format(stream.name),
+                'The number of channels of the channelised data stream',
+                '', default=stream.n_channels, initial_status=Sensor.NOMINAL),
+            'centerfrequency': Sensor.integer('{}.centerfrequency'.format(stream.name),
+                'The center frequency for the data stream', 'Hz')
         }
-        for sensor in self._product_sensors[product].itervalues():
+        for sensor in self._stream_sensors[stream].itervalues():
             self.add_sensor(sensor)
 
-    def add_fx_product(self, name, *args, **kwargs):
-        product = FXProduct(self._context, self._subarray, name, *args, **kwargs)
-        self._add_product(product)
-        return product
+    def add_fx_stream(self, name, *args, **kwargs):
+        stream = FXStream(self._context, self._subarray, name, *args, **kwargs)
+        self._add_stream(stream)
+        return stream
 
-    def add_beamformer_product(self, name, *args, **kwargs):
-        product = BeamformerProduct(self._subarray, name, *args, **kwargs)
-        self._add_product(product)
-        return product
+    def add_beamformer_stream(self, name, *args, **kwargs):
+        stream = BeamformerStream(self._subarray, name, *args, **kwargs)
+        self._add_stream(stream)
+        return stream
 
     @request(Str(), Int(), Int(), Int(), Int())
     @return_reply()
-    def request_product_create_correlator(
+    def request_stream_create_correlator(
             self, sock, name, adc_rate, center_frequency, bandwidth, n_channels):
-        """Create a new simulated correlator product
+        """Create a new simulated correlator stream
 
         Parameters
         ----------
         name : str
-            Name for the new product (must be unique)
+            Name for the new stream (must be unique)
         adc_rate : int
             Simulated ADC clock rate, in Hz
         center_frequency : int
             Sky frequency of the center of the band, in Hz
         bandwidth : int
-            Bandwidth of all channels in the product, in Hz
+            Bandwidth of all channels in the stream, in Hz
         n_channels : int
-            Number of channels in the product
+            Number of channels in the stream
         """
-        if name in self._products:
-            return 'fail', 'product {} already exists'.format(name)
+        if name in self._streams:
+            return 'fail', 'stream {} already exists'.format(name)
         if self._halting:
-            return 'fail', 'cannot add a product while halting'
+            return 'fail', 'cannot add a stream while halting'
         if self._context is None:
             return 'fail', 'no device context available'
-        self.add_fx_product(name, adc_rate, center_frequency, bandwidth, n_channels)
+        self.add_fx_stream(name, adc_rate, center_frequency, bandwidth, n_channels)
         return 'ok',
 
     @request(Str(), Int(), Int(), Int(), Int(), Int(), Int())
     @return_reply()
-    def request_product_create_beamformer(
+    def request_stream_create_beamformer(
             self, sock, name, adc_rate, center_frequency, bandwidth, n_channels,
             timesteps, sample_bits):
-        """Create a new simulated beamformer product"""
-        if name in self._products:
-            return 'fail', 'product {} already exists'.format(name)
+        """Create a new simulated beamformer stream"""
+        if name in self._streams:
+            return 'fail', 'stream {} already exists'.format(name)
         if self._halting:
-            return 'fail', 'cannot add a product while halting'
-        self.add_beamformer_product(name, adc_rate, center_frequency, bandwidth,
-                                    n_channels, timesteps, sample_bits)
+            return 'fail', 'cannot add a stream while halting'
+        self.add_beamformer_stream(name, adc_rate, center_frequency, bandwidth,
+                                   n_channels, timesteps, sample_bits)
         return 'ok',
 
-    def set_destination(self, product, endpoints, n_streams=None):
-        if n_streams is None:
+    def set_destination(self, stream, endpoints, n_substreams=None):
+        if n_substreams is None:
             # Formula used by MeerKAT CBF
-            n_streams = 4
-            while n_streams < max(len(endpoints), product.n_antennas * 4):
-                n_streams *= 2
-        if isinstance(product, FXProduct):
-            product.destination_factory = stream.FXStreamSpead.factory(endpoints, n_streams)
-        elif isinstance(product, BeamformerProduct):
-            product.destination_factory = stream.BeamformerStreamSpead.factory(endpoints, n_streams)
+            n_substreams = 4
+            while n_substreams < max(len(endpoints), stream.n_antennas * 4):
+                n_substreams *= 2
+        if isinstance(stream, FXStream):
+            stream.transport_factory = transport.FXSpeadTransport.factory(endpoints, n_substreams)
+        elif isinstance(stream, BeamformerStream):
+            stream.transport_factory = transport.BeamformerSpeadTransport.factory(endpoints, n_substreams)
         else:
-            raise product.UnsupportedProductError('unknown product type')
+            raise UnsupportedStreamError('unknown stream type')
 
     @request(Str(), Str(), Int(optional=True))
     @return_reply()
-    @_product_exceptions
-    @_product_request
-    def request_capture_destination(self, sock, product, destination, n_streams=None):
-        """Set the destination endpoints for a product"""
+    @_stream_exceptions
+    @_stream_request
+    def request_capture_destination(self, sock, stream, destination, n_substreams=None):
+        """Set the destination endpoints for a stream"""
         endpoints = endpoint.endpoint_list_parser(None)(destination)
         for e in endpoints:
             if e.port is None:
                 return 'fail', 'no port specified'
-        self.set_destination(product, endpoints, n_streams)
+        self.set_destination(stream, endpoints, n_substreams)
         return 'ok',
 
     @request(Str(), Str())
     @return_reply()
-    @_product_exceptions
-    @_product_request
-    def request_capture_destination_file(self, sock, product, destination):
+    @_stream_exceptions
+    @_stream_request
+    def request_capture_destination_file(self, sock, stream, destination):
         """Set the destination to an HDF5 file"""
-        if isinstance(product, FXProduct):
-            product.destination_factory = stream.FXStreamFile.factory(destination)
+        if isinstance(stream, FXStream):
+            stream.transport_factory = transport.FXFileTransport.factory(destination)
         else:
-            return 'fail', 'file capture not supported for this product type'
+            return 'fail', 'file capture not supported for this stream type'
         return 'ok',
 
     @request(Str(default=''))
     @return_reply()
     def request_capture_list(self, sock, req_name):
-        """List the destination endpoints for a product, or all products"""
-        if req_name != '' and req_name not in self._products:
-            return 'fail', 'requested product name "{}" not found'.format(req_name)
-        for name, product in self._products.items():
+        """List the destination endpoints for a stream, or all streams"""
+        if req_name != '' and req_name not in self._streams:
+            return 'fail', 'requested stream name "{}" not found'.format(req_name)
+        for name, stream in self._streams.items():
             if req_name == '' or req_name == name:
                 try:
-                    endpoints = product.destination.endpoints
+                    endpoints = stream.transport.endpoints
                 except AttributeError:
                     endpoints = [endpoint.Endpoint('0.0.0.0', 0)]
                 # TODO: Add a formatter to katsdptelstate.endpoint that
@@ -209,7 +212,7 @@ class SimulatorServer(katcp.DeviceServer):
 
     @request(Int())
     @return_reply()
-    @_product_exceptions
+    @_stream_exceptions
     def request_sync_time(self, sock, timestamp):
         """Set the sync time, as seconds since the UNIX epoch. This will also
         be the timestamp associated with the first data dump."""
@@ -221,7 +224,7 @@ class SimulatorServer(katcp.DeviceServer):
 
     @request(Float())
     @return_reply()
-    @_product_exceptions
+    @_stream_exceptions
     def request_clock_ratio(self, sock, clock_ratio):
         """Set the ratio between wall clock time and simulated time. Values
         less than 1 will cause simulated time to run faster than wall clock
@@ -257,71 +260,73 @@ class SimulatorServer(katcp.DeviceServer):
         self.set_position(katpoint.Target(position))
         return 'ok',
 
-    def set_accumulation_length(self, product, period):
-        if hasattr(product, 'accumulation_length'):
-            product.accumulation_length = period
+    def set_accumulation_length(self, stream, period):
+        if hasattr(stream, 'accumulation_length'):
+            stream.accumulation_length = period
         else:
-            raise product.UnsupportedProductError('product does not support setting accumulation length')
+            raise UnsupportedStreamError('stream does not support setting accumulation length')
 
     @request(Str(), Float())
     @return_reply(Float())
-    @_product_exceptions
-    @_product_request
-    def request_accumulation_length(self, sock, product, period):
-        """Set the accumulation interval for a product.
+    @_stream_exceptions
+    @_stream_request
+    def request_accumulation_length(self, sock, stream, period):
+        """Set the accumulation interval for a stream.
 
         Note: this differs from the CAM-CBF ICD, in which this is subarray-wide."""
-        self.set_accumulation_length(product, period)
+        self.set_accumulation_length(stream, period)
         # accumulation_length is a property, and the setter rounds the value.
         # We are thus returning the rounded value.
-        return 'ok', product.accumulation_length
+        return 'ok', stream.accumulation_length
 
-    def set_center_frequency(self, product, frequency):
-        product.center_frequency = frequency
-        # TODO: get the simulated timestamp from the product
-        self._product_sensors[product]['centerfrequency'].set_value(frequency)
+    def set_center_frequency(self, stream, frequency):
+        stream.center_frequency = frequency
+        # TODO: get the simulated timestamp from the stream
+        self._stream_sensors[stream]['centerfrequency'].set_value(frequency)
 
     @request(Str(), Int())
     @return_reply()
-    @_product_exceptions
-    @_product_request
-    def request_frequency_select(self, sock, product, frequency):
+    @_stream_exceptions
+    @_stream_request
+    def request_frequency_select(self, sock, stream, frequency):
         """Set the center frequency for the band. Unlike the real CBF, an
         arbitrary frequency may be selected, and it will not be rounded.
         """
-        self.set_center_frequency(product, frequency)
+        self.set_center_frequency(stream, frequency)
         return 'ok',
 
-    def set_n_dumps(self, product, n_dumps):
-        product.n_dumps = n_dumps
+    def set_n_dumps(self, stream, n_dumps):
+        stream.n_dumps = n_dumps
 
     @request(Str(), Int())
     @return_reply()
-    @_product_exceptions
-    @_product_request
-    def request_n_dumps(self, sock, product, n_dumps):
-        """Set a limited number of dumps for a product, after which it will
+    @_stream_exceptions
+    @_stream_request
+    def request_n_dumps(self, sock, stream, n_dumps):
+        """Set a limited number of dumps for a stream, after which it will
         stop.
         """
-        product.n_dumps = n_dumps
+        self.set_n_dumps(stream, n_dumps)
+        return 'ok',
 
     def set_gain(self, gain):
         self._subarray.gain = gain
 
-    @request(Str(), Float())
+    @request(Float())
     @return_reply()
-    @_product_exceptions
+    @_stream_exceptions
     def request_gain(self, sock, gain):
         """Set the system-wide gain, as the expected visibility value per
         Hz of channel bandwidth per second of integration."""
         self.set_gain(gain)
+        return 'ok',
 
     def add_antenna(self, antenna):
         self._subarray.add_antenna(antenna)
 
     @request(Str())
     @return_reply()
-    @_product_exceptions
+    @_stream_exceptions
     def request_antenna_add(self, sock, antenna_str):
         """Add an antenna to the simulated array, in the format accepted by katpoint."""
         self.add_antenna(katpoint.Antenna(antenna_str))
@@ -340,7 +345,7 @@ class SimulatorServer(katcp.DeviceServer):
 
     @request(Str())
     @return_reply()
-    @_product_exceptions
+    @_stream_exceptions
     def request_source_add(self, sock, source_str):
         """Add a source to the sky model, in the format accepted by katpoint."""
         self.add_source(katpoint.Target(source_str))
@@ -372,7 +377,7 @@ class SimulatorServer(katcp.DeviceServer):
 
     @request()
     @return_reply()
-    @_product_exceptions
+    @_stream_exceptions
     def request_configure_subarray_from_telstate(self, sock):
         """Configure the subarray using sensors and attributes in the telescope
         state. This uses dynamic values, rather than the :samp:`config`
@@ -383,55 +388,38 @@ class SimulatorServer(katcp.DeviceServer):
         self.configure_subarray_from_telstate()
         return 'ok',
 
-    def configure_product_from_telstate(self, product, telstate=None):
-        # This function kept only for backwards compatibility.
-        pass
+    def capture_start(self, stream):
+        stream.capture_start()
 
     @request(Str())
     @return_reply()
-    @_product_request
-    @_product_exceptions
-    def request_configure_product_from_telstate(self, sock, product):
-        """Configure product from sensors/attributes in telescope state.
-        Currently only accumulation length is set; in particular it will
-        **not** set a center frequency."""
-        if self._telstate is None:
-            return 'fail', 'no telescope state was specified with --telstate'
-        self.configure_product_from_telstate(product)
-        return 'ok',
-
-    def capture_start(self, product):
-        product.capture_start()
-
-    @request(Str())
-    @return_reply()
-    @_product_exceptions
-    @_product_request
-    def request_capture_start(self, sock, product):
-        """Start the flow of data for a product"""
+    @_stream_exceptions
+    @_stream_request
+    def request_capture_start(self, sock, stream):
+        """Start the flow of data for a stream"""
         if self._halting:
             return 'fail', 'cannot start capture while halting'
-        self.capture_start(product)
+        self.capture_start(stream)
         return 'ok',
 
     @request(Str())
     @return_reply()
     @tornado.gen.coroutine
     def request_capture_stop(self, sock, name):
-        """Stop the flow of data for a product"""
+        """Stop the flow of data for a stream"""
         try:
-            product = self._products[name]
+            stream = self._streams[name]
         except KeyError:
-            raise tornado.gen.Return(('fail', 'requested product name "{}" not found'.format(name)))
-        stop = trollius.async(product.capture_stop())
+            raise tornado.gen.Return(('fail', 'requested stream name "{}" not found'.format(name)))
+        stop = trollius.async(stream.capture_stop())
         yield tornado.platform.asyncio.to_tornado_future(stop)
         raise tornado.gen.Return(('ok',))
 
     @tornado.gen.coroutine
     def request_halt(self, req, msg):
-        self._halting = True  # Prevents changes to _products while we iterate
-        for product in self._products.values():
-            stop = trollius.async(product.capture_stop())
+        self._halting = True  # Prevents changes to _streams while we iterate
+        for stream in self._streams.values():
+            stop = trollius.async(stream.capture_stop())
             yield tornado.platform.asyncio.to_tornado_future(stop)
         yield tornado.gen.maybe_future(super(SimulatorServer, self).request_halt(req, msg))
 

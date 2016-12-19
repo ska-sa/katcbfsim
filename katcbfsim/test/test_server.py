@@ -11,7 +11,7 @@ from tornado.gen import Return
 from tornado.platform.asyncio import AsyncIOMainLoop
 from katsdpsigproc import accel
 from katsdpsigproc.test.test_accel import device_test, cuda_test, force_autotune
-from katcbfsim import server, product, stream
+from katcbfsim import server, stream, transport
 from nose.tools import *
 
 
@@ -24,25 +24,25 @@ def async_test(func):
     return wrapper
 
 
-# Last created MockStream, for tests to reach in and check state
-_current_stream = None
+# Last created MockTransport, for tests to reach in and check state
+_current_transport = None
 
 
-class MockStream(object):
-    """Stream that throws away its data, for testing purposes."""
+class MockTransport(object):
+    """Transport that throws away its data, for testing purposes."""
     @classmethod
-    def factory(cls, endpoints, n_streams):
-        return functools.partial(cls, endpoints, n_streams)
+    def factory(cls, endpoints, n_substreams):
+        return functools.partial(cls, endpoints, n_substreams)
 
-    def __init__(self, endpoints, n_streams, product):
-        global _current_stream
+    def __init__(self, endpoints, n_substreams, stream):
+        global _current_transport
         self.endpoints = endpoints
-        self.product = product
+        self.stream = stream
         self.dumps = 0
         self.dumps_semaphore = tornado.locks.Semaphore(0)
         self.closed = False
-        self.n_streams = n_streams
-        _current_stream = self
+        self.n_substreams = n_substreams
+        _current_transport = self
 
     def send_metadata(self):
         pass
@@ -56,11 +56,11 @@ class MockStream(object):
         self.closed = True
 
 
-class FXStreamMock(MockStream):
+class FXMockTransport(MockTransport):
     pass
 
 
-class BeamformerStreamMock(MockStream):
+class BeamformerMockTransport(MockTransport):
     pass
 
 
@@ -68,8 +68,8 @@ class TestSimulationServer(object):
     @device_test
     def setup(self, context, queue):
         self._patchers = [
-            mock.patch('katcbfsim.stream.FXStreamSpead', FXStreamMock),
-            mock.patch('katcbfsim.stream.BeamformerStreamSpead', BeamformerStreamMock)
+            mock.patch('katcbfsim.transport.FXSpeadTransport', FXMockTransport),
+            mock.patch('katcbfsim.transport.BeamformerSpeadTransport', BeamformerMockTransport)
         ]
         for patcher in self._patchers:
             patcher.start()
@@ -96,7 +96,7 @@ class TestSimulationServer(object):
         for patcher in reversed(self._patchers):
             patcher.stop()
         tornado.ioloop.IOLoop.clear_instance()
-        _current_stream = None
+        _current_transport = None
 
     @tornado.gen.coroutine
     def make_request(self, name, *args):
@@ -154,24 +154,24 @@ class TestSimulationServer(object):
             min_dumps = 5    # Should be enough to demonstrate overlapping I/O
         yield self._configure_subarray()
         # Number of channels is kept small to avoid using too much memory
-        yield self.make_request('product-create-correlator', 'cross', 1712000000, 1284000000, 856000000, 4096)
+        yield self.make_request('stream-create-correlator', 'cross', 1712000000, 1284000000, 856000000, 4096)
         yield self.make_request('capture-destination', 'cross', 'localhost:7148')
         yield self.make_request('accumulation-length', 'cross', 0.5)
         yield self.make_request('frequency-select', 'cross', 1284000000)
         yield self.make_request('capture-start', 'cross')
         # Wait until we've received the minimum number of dumps
         for i in range(min_dumps):
-            yield _current_stream.dumps_semaphore.acquire()
+            yield _current_transport.dumps_semaphore.acquire()
         yield self.make_request('capture-stop', 'cross')
-        assert_is_not_none(_current_stream)
-        assert_greater_equal(_current_stream.dumps, min_dumps)
-        assert_true(_current_stream.closed)
+        assert_is_not_none(_current_transport)
+        assert_greater_equal(_current_transport.dumps, min_dumps)
+        assert_true(_current_transport.closed)
 
     @cuda_test
     @async_test
     @tornado.gen.coroutine
     def test_fx_capture(self):
-        """Create an FX product, start it, and stop it again"""
+        """Create an FX stream, start it, and stop it again"""
         yield self._test_fx_capture()
 
     @cuda_test
@@ -187,15 +187,15 @@ class TestSimulationServer(object):
             min_dumps = 5    # Should be enough to demonstrate overlapping I/O
         yield self._configure_subarray()
         # Use lower bandwidth to reduce test time
-        yield self.make_request('product-create-beamformer', 'beam1', 1712000000, 1284000000, 856000000 / 4, 32768, 256, 8)
+        yield self.make_request('stream-create-beamformer', 'beam1', 1712000000, 1284000000, 856000000 / 4, 32768, 256, 8)
         yield self.make_request('capture-destination', 'beam1', 'localhost:7149')
         yield self.make_request('capture-start', 'beam1')
         for i in range(min_dumps):
-            yield _current_stream.dumps_semaphore.acquire()
+            yield _current_transport.dumps_semaphore.acquire()
         yield self.make_request('capture-stop', 'beam1')
-        assert_is_not_none(_current_stream)
-        assert_greater_equal(_current_stream.dumps, min_dumps)
-        assert_true(_current_stream.closed)
+        assert_is_not_none(_current_transport)
+        assert_greater_equal(_current_transport.dumps, min_dumps)
+        assert_true(_current_transport.closed)
 
     @async_test
     @tornado.gen.coroutine
@@ -211,14 +211,14 @@ class TestSimulationServer(object):
 
     @async_test
     @tornado.gen.coroutine
-    def test_unknown_product_name(self):
-        """An appropriate error is returned when using an unknown product name."""
-        yield self.assert_request_fails('^requested product name "unknown" not found$', 'capture-destination', 'unknown', '127.0.0.1:7147')
-        yield self.assert_request_fails('^requested product name "unknown" not found$', 'capture-destination-file', 'unknown', '/dev/null')
-        yield self.assert_request_fails('^requested product name "unknown" not found$', 'capture-start', 'unknown')
-        yield self.assert_request_fails('^requested product name "unknown" not found$', 'capture-stop', 'unknown')
-        yield self.assert_request_fails('^requested product name "unknown" not found$', 'accumulation-length', 'unknown', 0.5)
-        yield self.assert_request_fails('^requested product name "unknown" not found$', 'frequency-select', 'unknown', 1000000000)
+    def test_unknown_stream_name(self):
+        """An appropriate error is returned when using an unknown stream name."""
+        yield self.assert_request_fails('^requested stream name "unknown" not found$', 'capture-destination', 'unknown', '127.0.0.1:7147')
+        yield self.assert_request_fails('^requested stream name "unknown" not found$', 'capture-destination-file', 'unknown', '/dev/null')
+        yield self.assert_request_fails('^requested stream name "unknown" not found$', 'capture-start', 'unknown')
+        yield self.assert_request_fails('^requested stream name "unknown" not found$', 'capture-stop', 'unknown')
+        yield self.assert_request_fails('^requested stream name "unknown" not found$', 'accumulation-length', 'unknown', 0.5)
+        yield self.assert_request_fails('^requested stream name "unknown" not found$', 'frequency-select', 'unknown', 1000000000)
 
     @async_test
     @tornado.gen.coroutine
@@ -227,7 +227,7 @@ class TestSimulationServer(object):
         a capture is in progress."""
         yield self._configure_subarray()
         # Use lower bandwidth to reduce test time
-        yield self.make_request('product-create-beamformer', 'beam1', 1712000000, 1284000000, 856000000 / 4, 32768, 256, 8)
+        yield self.make_request('stream-create-beamformer', 'beam1', 1712000000, 1284000000, 856000000 / 4, 32768, 256, 8)
         yield self.make_request('capture-destination', 'beam1', 'localhost:7149')
         yield self.make_request('capture-start', 'beam1')
         yield self.assert_request_fails('^cannot add antennas while capture is in progress$', 'antenna-add', 'm062, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -1440.69968823 -2269.26759132 6.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22')
