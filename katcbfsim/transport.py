@@ -22,7 +22,7 @@ class EndpointFactory(object):
         self.n_substreams = n_substreams
 
     def __call__(self, *args, **kwargs):
-        return cls(self.endpoints, self.n_substreams, *args, **kwargs)
+        return self.cls(self.endpoints, self.n_substreams, *args, **kwargs)
 
 
 class SpeadTransport(object):
