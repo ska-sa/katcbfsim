@@ -6,9 +6,10 @@ import katpoint
 import tornado
 import logging
 import functools
+import ipaddress
 from katcp import Sensor
 from katcp.kattypes import Str, Float, Int, Address, request, return_reply
-from katsdptelstate import endpoint
+from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
 import katcbfsim
 from . import transport
 from .stream import (Subarray, FXStream, BeamformerStream,
@@ -44,6 +45,57 @@ def _stream_exceptions(wrapped):
             return 'fail', str(e)
     functools.update_wrapper(wrapper, wrapped)
     return wrapper
+
+
+def endpoints_to_str(endpoints):
+    """Convert a list of endpoints into a compact string that generates the
+    same list. This is the inverse of
+    :func:`katsdptelstate.endpoint.endpoint_list_parser`.
+    """
+    # Partition the endpoints by type
+    ipv4 = []
+    ipv6 = []
+    other = []
+    for endpoint in endpoints:
+        # ipaddress module requires unicode, to convert if not already
+        host = endpoint.host.decode('utf-8') if isinstance(endpoint.host, bytes) else endpoint.host
+        try:
+            ipv4.append(Endpoint(ipaddress.IPv4Address(host), endpoint.port))
+        except ipaddress.AddressValueError:
+            try:
+                ipv6.append(Endpoint(ipaddress.IPv6Address(host), endpoint.port))
+            except ipaddress.AddressValueError:
+                other.append(endpoint)
+    # We build a list of parts, each of which is either host:port, addr:port or
+    # addr+n:port (where :port is omitted if None). These get comma-separated
+    # at the end.
+    parts = []
+    for ip in (ipv4, ipv6):
+        ip_parts = []    # lists of address, num, port (not tuples because mutated)
+        # Group endpoints with the same port together, then order by IP address
+        ip.sort(key=lambda endpoint: (endpoint.port is not None, endpoint.port, endpoint.host))
+        for endpoint in ip:
+            if (ip_parts and ip_parts[-1][2] == endpoint.port and
+                    ip_parts[-1][0] + ip_parts[-1][1] == endpoint.host):
+                ip_parts[-1][1] += 1
+            else:
+                ip_parts.append([endpoint.host, 1, endpoint.port])
+        for (address, num, port) in ip_parts:
+            if ip is ipv6:
+                s = '[' + address.compressed + ']'
+            else:
+                s = address.compressed
+            if num > 1:
+                s += '+{}'.format(num - 1)
+            if port is not None:
+                s += ':{}'.format(port)
+            parts.append(s)
+    for endpoint in other:
+        s = str(endpoint.host)
+        if endpoint.port is not None:
+            s += ':{}'.format(endpoint.port)
+        parts.append(s)
+    return ','.join(parts)
 
 
 class SimulatorServer(katcp.DeviceServer):
@@ -171,7 +223,7 @@ class SimulatorServer(katcp.DeviceServer):
     @_stream_request
     def request_capture_destination(self, sock, stream, destination, n_substreams=None):
         """Set the destination endpoints for a stream"""
-        endpoints = endpoint.endpoint_list_parser(None)(destination)
+        endpoints = endpoint_list_parser(None)(destination)
         for e in endpoints:
             if e.port is None:
                 return 'fail', 'no port specified'
@@ -199,12 +251,11 @@ class SimulatorServer(katcp.DeviceServer):
         for name, stream in self._streams.items():
             if req_name == '' or req_name == name:
                 try:
-                    endpoints = stream.transport.endpoints
+                    endpoints = stream.transport_factory.endpoints
                 except AttributeError:
-                    endpoints = [endpoint.Endpoint('0.0.0.0', 0)]
-                # TODO: Add a formatter to katsdptelstate.endpoint that
-                # reconstructs the a.b.c.d+N:port format.
-                sock.inform(','.join([str(x) for x in endpoints]))
+                    endpoints = [Endpoint('0.0.0.0', 0)]
+                endpoints_str = endpoints_to_str(endpoints)
+                sock.inform(name, endpoints_str)
         return 'ok',
 
     def set_sync_time(self, timestamp):

@@ -9,18 +9,27 @@ import spead2.send
 import spead2.send.trollius
 import h5py
 import logging
-import functools
 from collections import deque
 
 
 logger = logging.getLogger(__name__)
 
 
+class EndpointFactory(object):
+    def __init__(self, cls, endpoints, n_substreams):
+        self.cls = cls
+        self.endpoints = endpoints
+        self.n_substreams = n_substreams
+
+    def __call__(self, *args, **kwargs):
+        return cls(self.endpoints, self.n_substreams, *args, **kwargs)
+
+
 class SpeadTransport(object):
     """Base class for SPEAD streams, providing a factory function."""
     @classmethod
     def factory(cls, endpoints, n_substreams):
-        return functools.partial(cls, endpoints, n_substreams)
+        return EndpointFactory(cls, endpoints, n_substreams)
 
     @property
     def n_endpoints(self):
@@ -288,11 +297,20 @@ class FXSpeadTransport(CBFSpeadTransport):
             yield From(future)
 
 
+class FileFactory(object):
+    def __init__(self, cls, filename):
+        self.cls = cls
+        self.filename = filename
+
+    def __call__(self, *args, **kwargs):
+        return self.cls(filename, *args, **kwargs)
+
+
 class FileTransport(object):
     """Base class for file-sink streams, providing a factory function."""
     @classmethod
     def factory(cls, filename):
-        return functools.partial(cls, filename)
+        return FileFactory(cls, filename)
 
     def __init__(self, filename, stream):
         self._stream = stream
