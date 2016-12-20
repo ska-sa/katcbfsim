@@ -90,7 +90,7 @@ def prepare_server(server, args):
             args.cbf_adc_sample_rate, args.cbf_center_freq, args.cbf_bandwidth,
             args.cbf_channels)
         server.set_accumulation_length(stream, args.cbf_int_time)
-        server.set_destination(stream, args.cbf_spead, args.cbf_substreams)
+        server.set_destination(stream, args.cbf_spead, args.cbf_substreams, args.max_packet_size)
         if args.dumps:
             server.set_n_dumps(stream, args.dumps)
         if args.start:
@@ -100,7 +100,7 @@ def prepare_server(server, args):
             args.create_beamformer_stream,
             args.cbf_adc_sample_rate, args.cbf_center_freq, args.cbf_bandwidth,
             args.cbf_channels, args.beamformer_timesteps, args.beamformer_bits)
-        server.set_destination(stream, args.cbf_spead, args.cbf_substreams)
+        server.set_destination(stream, args.cbf_spead, args.cbf_substreams, args.max_packet_size)
         if args.dumps:
             server.set_n_dumps(stream, args.dumps)
         if args.start:
@@ -145,6 +145,7 @@ def main():
     parser.add_argument('--cbf-target', metavar='DESCRIPTION', help='Set initial target')
     parser.add_argument('--beamformer-timesteps', metavar='TIMES', type=int, default=256, help='Spectra included in each beamformer heap [%(default)s]')
     parser.add_argument('--beamformer-bits', metavar='BITS', type=int, choices=[8, 16, 32], default=8, help='Bits per real value in beamformer data [%(default)s]')
+    parser.add_argument('--max-packet-size', metavar='BYTES', type=int, default=4096, help='Maximum SPEAD packet size for streams defined on command line [%(default)s]')
     parser.add_argument('--port', '-p', type=int, default=7147, help='katcp host port [%(default)s]')
     parser.add_argument('--host', '-a', type=str, default='', help='katcp host address [all hosts]')
     parser.add_argument('--log-level', '-l', default='INFO', help='logging level [%(default)s]')

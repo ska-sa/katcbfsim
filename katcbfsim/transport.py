@@ -16,26 +16,29 @@ logger = logging.getLogger(__name__)
 
 
 class EndpointFactory(object):
-    def __init__(self, cls, endpoints, n_substreams):
+    def __init__(self, cls, endpoints, n_substreams, max_packet_size):
         self.cls = cls
         self.endpoints = endpoints
         self.n_substreams = n_substreams
+        if max_packet_size is None:
+            max_packet_size = 4096
+        self.max_packet_size = max_packet_size
 
-    def __call__(self, *args, **kwargs):
-        return self.cls(self.endpoints, self.n_substreams, *args, **kwargs)
+    def __call__(self, stream):
+        return self.cls(self.endpoints, self.n_substreams, self.max_packet_size, stream)
 
 
 class SpeadTransport(object):
     """Base class for SPEAD streams, providing a factory function."""
     @classmethod
-    def factory(cls, endpoints, n_substreams):
-        return EndpointFactory(cls, endpoints, n_substreams)
+    def factory(cls, endpoints, n_substreams, max_packet_size):
+        return EndpointFactory(cls, endpoints, n_substreams, max_packet_size)
 
     @property
     def n_endpoints(self):
         return len(self.endpoints)
 
-    def __init__(self, endpoints, n_substreams, stream, in_rate):
+    def __init__(self, endpoints, n_substreams, max_packet_size, stream, in_rate):
         if not endpoints:
             raise ValueError('At least one endpoint is required')
         n = len(endpoints)
@@ -51,7 +54,7 @@ class SpeadTransport(object):
         # Send at a slightly higher rate, to account for overheads, and so
         # that if the sender sends a burst we can catch up with it.
         out_rate = in_rate * 1.05 / n
-        config = spead2.send.StreamConfig(rate=out_rate, max_packet_size=4096)
+        config = spead2.send.StreamConfig(rate=out_rate, max_packet_size=max_packet_size)
         self._substreams = []
         for i in range(n_substreams):
             e = endpoints[i * len(endpoints) // n_substreams]
@@ -176,10 +179,10 @@ class CBFSpeadTransport(SpeadTransport):
 
 class FXSpeadTransport(CBFSpeadTransport):
     """Data stream from an FX correlator, sent over SPEAD."""
-    def __init__(self, endpoints, n_substreams, stream):
+    def __init__(self, endpoints, n_substreams, max_packet_size, stream):
         in_rate = stream.n_baselines * stream.n_channels * 4 * 8 / \
             stream.accumulation_length
-        super(FXSpeadTransport, self).__init__(endpoints, n_substreams, stream, in_rate)
+        super(FXSpeadTransport, self).__init__(endpoints, n_substreams, max_packet_size, stream, in_rate)
         self._ig_static = [self._make_ig_static(i) for i in range(self.n_endpoints)]
         self._ig_gain = self._make_ig_gain()
         self._ig_labels = self._make_ig_labels()
@@ -346,12 +349,13 @@ class FXFileTransport(FileTransport):
 
 class BeamformerSpeadTransport(CBFSpeadTransport):
     """Data stream from a beamformer, sent over SPEAD."""
-    def __init__(self, endpoints, n_substreams, stream):
+    def __init__(self, endpoints, n_substreams, max_packet_size, stream):
         if stream.wall_interval == 0:
             in_rate = 0
         else:
             in_rate = stream.n_channels * stream.timesteps * 2 * stream.sample_bits / stream.wall_interval / 8
-        super(BeamformerSpeadTransport, self).__init__(endpoints, n_substreams, stream, in_rate)
+        super(BeamformerSpeadTransport, self).__init__(
+            endpoints, n_substreams, max_packet_size, stream, in_rate)
         self.xeng_acc_len = self.stream.timesteps
         self._ig_static = [self._make_ig_static(i) for i in range(self.n_endpoints)]
         self._ig_weights = self._make_ig_weights()
