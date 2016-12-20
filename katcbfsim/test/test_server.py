@@ -51,10 +51,10 @@ _current_transport = None
 class MockTransport(object):
     """Transport that throws away its data, for testing purposes."""
     @classmethod
-    def factory(cls, endpoints, n_substreams):
-        return functools.partial(cls, endpoints, n_substreams)
+    def factory(cls, endpoints, n_substreams, max_packet_size):
+        return transport.EndpointFactory(cls, endpoints, n_substreams, max_packet_size)
 
-    def __init__(self, endpoints, n_substreams, stream):
+    def __init__(self, endpoints, n_substreams, max_packet_size, stream):
         global _current_transport
         self.endpoints = endpoints
         self.stream = stream
