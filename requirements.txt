@@ -9,6 +9,7 @@ futures
 h5py
 katcp
 katversion
+ipaddress==1.0.17
 linecache2
 Mako
 MarkupSafe
