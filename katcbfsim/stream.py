@@ -211,6 +211,7 @@ class Stream(object):
             self._loop = trollius.get_event_loop()
         else:
             self._loop = loop
+        self._last_warn_behind = 0
 
     def __setattr__(self, key, value):
         # Prevent modifications while capture is in progress
@@ -291,9 +292,12 @@ class Stream(object):
         try:
             now = self._loop.time()
             if now > wall_time:
-                logger.warn('Falling behind the requested rate by %f seconds', now - wall_time)
+                if now - self._last_warn_behind >= 1:
+                    logger.warn('Falling behind the requested rate by %f seconds', now - wall_time)
+                    self._last_warn_behind = now
             else:
                 logger.debug('Sleeping for %f seconds', wall_time - now)
+                self._last_warn_behind = 0
             yield From(resource.wait_until(trollius.shield(self._stop_future), wall_time, self._loop))
         except trollius.TimeoutError:
             # This is the normal case: time for the next dump to be transmitted
