@@ -204,30 +204,33 @@ class SimulatorServer(katcp.DeviceServer):
                                    n_channels, timesteps, sample_bits)
         return 'ok',
 
-    def set_destination(self, stream, endpoints, n_substreams=None):
+    def set_destination(self, stream, endpoints, n_substreams=None, max_packet_size=None):
         if n_substreams is None:
             # Formula used by MeerKAT CBF
             n_substreams = 4
             while n_substreams < max(len(endpoints), stream.n_antennas * 4):
                 n_substreams *= 2
         if isinstance(stream, FXStream):
-            stream.transport_factory = transport.FXSpeadTransport.factory(endpoints, n_substreams)
+            stream.transport_factory = \
+                transport.FXSpeadTransport.factory(endpoints, n_substreams, max_packet_size)
         elif isinstance(stream, BeamformerStream):
-            stream.transport_factory = transport.BeamformerSpeadTransport.factory(endpoints, n_substreams)
+            stream.transport_factory = \
+                transport.BeamformerSpeadTransport.factory(endpoints, n_substreams, max_packet_size)
         else:
             raise UnsupportedStreamError('unknown stream type')
 
-    @request(Str(), Str(), Int(optional=True))
+    @request(Str(), Str(), Int(optional=True), Int(optional=True))
     @return_reply()
     @_stream_exceptions
     @_stream_request
-    def request_capture_destination(self, sock, stream, destination, n_substreams=None):
+    def request_capture_destination(self, sock, stream, destination, n_substreams=None,
+                                    max_packet_size=None):
         """Set the destination endpoints for a stream"""
         endpoints = endpoint_list_parser(None)(destination)
         for e in endpoints:
             if e.port is None:
                 return 'fail', 'no port specified'
-        self.set_destination(stream, endpoints, n_substreams)
+        self.set_destination(stream, endpoints, n_substreams, max_packet_size)
         return 'ok',
 
     @request(Str(), Str())
