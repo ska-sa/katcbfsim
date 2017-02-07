@@ -82,8 +82,6 @@ class CBFSpeadTransport(SpeadTransport):
     """
     def __init__(self, *args, **kwargs):
         super(CBFSpeadTransport, self).__init__(*args, **kwargs)
-        # CBF apparently use this, even though it wraps pretty quickly
-        self.scale_factor_timestamp = self.stream.adc_rate
         self.ig_data = [self.make_ig_data() for i in range(self.n_substreams)]
 
     def make_ig_data(self):
@@ -109,9 +107,9 @@ class CBFSpeadTransport(SpeadTransport):
         futures = []
         # Send to all endpoints in parallel
         for i in range(self.n_endpoints):
-            futures.append(trollius.async(self._send_metadata_endpoint(i)))
-        for future in futures:
-            yield From(future)
+            futures.append(trollius.ensure_future(self._send_metadata_endpoint(i),
+                                                  loop=self.stream.loop))
+        yield From(trollius.gather(*futures, loop=self.stream.loop))
 
 
 class FXSpeadTransport(CBFSpeadTransport):
@@ -135,7 +133,8 @@ class FXSpeadTransport(CBFSpeadTransport):
         substream_channels = self.stream.n_channels // self.n_substreams
         vis_view = vis.reshape(*shape)
         futures = []
-        timestamp = dump_index * self.stream.n_accs * self.stream.n_channels * self.scale_factor_timestamp // self.stream.bandwidth
+        timestamp = dump_index * self.stream.n_accs * self.stream.n_channels * \
+                self.stream.scale_factor_timestamp // self.stream.bandwidth
         # Truncate timestamp to the width of the field it is in
         timestamp = timestamp & ((1 << self._flavour.heap_address_bits) - 1)
         for i, substream in enumerate(self._substreams):
@@ -145,9 +144,9 @@ class FXSpeadTransport(CBFSpeadTransport):
             self.ig_data[i]['timestamp'].value = timestamp
             self.ig_data[i]['frequency'].value = channel0
             heap = self.ig_data[i].get_heap()
-            futures.append(trollius.async(substream.async_send_heap(heap)))
-        for future in futures:
-            yield From(future)
+            futures.append(trollius.ensure_future(substream.async_send_heap(heap),
+                                                  loop=self.stream.loop))
+        yield From(trollius.gather(*futures, loop=self.stream.loop))
 
 
 class FileFactory(object):
@@ -216,7 +215,8 @@ class BeamformerSpeadTransport(CBFSpeadTransport):
     @trollius.coroutine
     def send(self, beam_data, index):
         substream_channels = self.stream.n_channels // self.n_substreams
-        timestamp = index * self.stream.timesteps * self.stream.n_channels * self.scale_factor_timestamp // self.stream.bandwidth
+        timestamp = index * self.stream.timesteps * self.stream.n_channels * \
+                self.stream.scale_factor_timestamp // self.stream.bandwidth
         # Truncate timestamp to the width of the field it is in
         timestamp = timestamp & ((1 << self._flavour.heap_address_bits) - 1)
         futures = []
@@ -227,8 +227,7 @@ class BeamformerSpeadTransport(CBFSpeadTransport):
             self.ig_data[i]['timestamp'].value = timestamp
             heap = self.ig_data[i].get_heap()
             futures.append(substream.async_send_heap(heap))
-        for future in futures:
-            yield From(future)
+        yield From(trollius.gather(*futures, loop=self.stream.loop))
 
 
 #############################################################################
@@ -270,9 +269,7 @@ class TelstateTransport(object):
 
     @trollius.coroutine
     def send_metadata(self):
-        # TODO: get event loop via constructor
-        loop = trollius.get_event_loop()
-        yield From(loop.run_in_executor(self._executor, self._send_metadata))
+        yield From(self.stream.loop.run_in_executor(self._executor, self._send_metadata))
 
     @trollius.coroutine
     def send(self, data, index):
@@ -294,7 +291,6 @@ class CBFTelstateTransport(TelstateTransport):
         self.stream_name = stream_name
         self.antenna_channelised_voltage_stream_name = antenna_channelised_voltage_stream_name
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        self.scale_factor_timestamp = self.stream.adc_rate
 
     @classmethod
     def _make_prefix(cls, scope):
@@ -313,7 +309,7 @@ class CBFTelstateTransport(TelstateTransport):
         # Only the sensors captured by cam2telstate are simulated
         self.sensor(pre + 'adc_sample_rate', float(self.stream.adc_rate))
         self.sensor(pre + 'bandwidth', float(self.stream.bandwidth))
-        self.sensor(pre + 'scale_factor_timestamp', self.scale_factor_timestamp)
+        self.sensor(pre + 'scale_factor_timestamp', self.stream.scale_factor_timestamp)
         self.sensor(pre + 'sync_time', self.stream.subarray.sync_time.secs)
         self.sensor(pre + 'n_inputs', 2 * self.stream.n_antennas)
 
@@ -331,7 +327,7 @@ class CBFTelstateTransport(TelstateTransport):
         self.sensor(pre + 'center_freq', float(center_frequency))
         self.sensor(pre + 'n_chans', self.stream.n_channels)
         self.sensor(pre + 'ticks_between_spectra',
-                    self.stream.n_channels * self.scale_factor_timestamp // self.stream.bandwidth)
+                    self.stream.n_channels * self.stream.scale_factor_timestamp // self.stream.bandwidth)
 
     def _send_metadata(self):
         super(CBFTelstateTransport, self)._send_metadata()

@@ -201,6 +201,8 @@ class Stream(object):
         Whether a capture is in progress. This is true from
         :meth:`capture_start` until :meth:`capture_stop` completes, even if
         the capture coroutine terminates earlier.
+    loop : :class:`trollius.BaseEventLoop`
+        Event loop for coroutines
     """
     def __init__(self, subarray, name, loop=None):
         self._capture_future = None
@@ -209,9 +211,9 @@ class Stream(object):
         self.subarray = subarray
         self.transport_factories = []
         if loop is None:
-            self._loop = trollius.get_event_loop()
+            self.loop = trollius.get_event_loop()
         else:
-            self._loop = loop
+            self.loop = loop
         self._last_warn_behind = 0
 
     def __setattr__(self, key, value):
@@ -253,9 +255,9 @@ class Stream(object):
             raise IncompleteConfigError('no destination specified')
         self.subarray.capturing += 1
         # Create a future that is set by capture_stop
-        self._stop_future = trollius.Future(loop=self._loop)
+        self._stop_future = trollius.Future(loop=self.loop)
         # Start the capture coroutine on the event loop
-        self._capture_future = trollius.async(self._capture(), loop=self._loop)
+        self._capture_future = trollius.async(self._capture(), loop=self.loop)
 
     @trollius.coroutine
     def capture_stop(self):
@@ -291,7 +293,7 @@ class Stream(object):
             If true, then :meth:`capture_stop` was called.
         """
         try:
-            now = self._loop.time()
+            now = self.loop.time()
             if now > wall_time:
                 if now - self._last_warn_behind >= 1:
                     logger.warn('Falling behind the requested rate by %f seconds', now - wall_time)
@@ -299,7 +301,7 @@ class Stream(object):
             else:
                 logger.debug('Sleeping for %f seconds', wall_time - now)
                 self._last_warn_behind = 0
-            yield From(resource.wait_until(trollius.shield(self._stop_future), wall_time, self._loop))
+            yield From(resource.wait_until(trollius.shield(self._stop_future), wall_time, self.loop))
         except trollius.TimeoutError:
             # This is the normal case: time for the next dump to be transmitted
             stopped = False
@@ -341,6 +343,8 @@ class CBFStream(Stream):
         Number of channels in the stream
     n_dumps : int
         If not ``None``, limits the number of dumps that will be done
+    scale_factor_timestamp : int
+        Number of timestamp increments per second
     """
     def __init__(self, subarray, name, adc_rate, center_frequency, bandwidth,
                  n_channels, loop=None):
@@ -350,6 +354,8 @@ class CBFStream(Stream):
         self.bandwidth = bandwidth
         self.n_channels = n_channels
         self.n_dumps = None
+        # This is what real CBF uses, even though it wraps pretty quickly
+        self.scale_factor_timestamp = adc_rate
 
 
 class FXStream(CBFStream):
@@ -523,7 +529,7 @@ class FXStream(CBFStream):
                 data_a.ready([transfer_event])
                 io_queue_a.ready()
                 # Wait for the transfer to complete
-                yield From(resource.async_wait_for_events([transfer_event], loop=self._loop))
+                yield From(resource.async_wait_for_events([transfer_event], loop=self.loop))
                 logger.debug('Dump %d: transfer to host complete, waiting for transport', index)
 
                 # Send the data
@@ -549,14 +555,14 @@ class FXStream(CBFStream):
             transports = [factory(self) for factory in self.transport_factories]
             for transport in transports:
                 yield From(transport.send_metadata())
-            predict, data, host = yield From(self._loop.run_in_executor(None, self._make_predict))
+            predict, data, host = yield From(self.loop.run_in_executor(None, self._make_predict))
             index = 0
-            predict_r = resource.Resource(predict, loop=self._loop)
-            io_queue_r = resource.Resource(self.context.create_command_queue(), loop=self._loop)
-            data_r = [resource.Resource(x, loop=self._loop) for x in data]
-            host_r = [resource.Resource(x, loop=self._loop) for x in host]
-            transports_r = resource.Resource(transports, loop=self._loop)
-            wall_time = self._loop.time()
+            predict_r = resource.Resource(predict, loop=self.loop)
+            io_queue_r = resource.Resource(self.context.create_command_queue(), loop=self.loop)
+            data_r = [resource.Resource(x, loop=self.loop) for x in data]
+            host_r = [resource.Resource(x, loop=self.loop) for x in host]
+            transports_r = resource.Resource(transports, loop=self.loop)
+            wall_time = self.loop.time()
             while self.n_dumps is None or index < self.n_dumps:
                 predict_a = predict_r.acquire()
                 data_a = data_r[index % len(data_r)].acquire()
@@ -572,7 +578,7 @@ class FXStream(CBFStream):
                 logger.debug('Dump %d: predictor ready', index)
                 future = trollius.async(
                     self._run_dump(index, predict_a, data_a, host_a, transports_a, io_queue_a),
-                    loop=self._loop)
+                    loop=self.loop)
                 dump_futures.append(future)
                 # Sleep until either it is time to make the next dump, or we are asked
                 # to stop.
@@ -689,13 +695,13 @@ class BeamformerStream(CBFStream):
             for transport in transports:
                 yield From(transport.send_metadata())
             index = 0
-            wall_time = self._loop.time()
+            wall_time = self.loop.time()
             while self.n_dumps is None or index < self.n_dumps:
                 while len(dump_futures) > 3:
                     yield From(dump_futures[0])
                     dump_futures.popleft()
                 future = trollius.async(
-                    self._run_dump(transports, index), loop=self._loop)
+                    self._run_dump(transports, index), loop=self.loop)
                 dump_futures.append(future)
                 wall_time += self.wall_interval
                 stopped = yield From(self.wait_for_next(wall_time))
