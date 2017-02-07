@@ -12,6 +12,7 @@ from tornado.gen import Return
 from tornado.platform.asyncio import AsyncIOMainLoop
 from katsdpsigproc import accel
 from katsdpsigproc.test.test_accel import device_test, cuda_test, force_autotune
+import katsdptelstate
 from katsdptelstate.endpoint import Endpoint
 from katcbfsim import server, stream, transport
 from nose.tools import *
@@ -89,18 +90,22 @@ class BeamformerMockTransport(MockTransport):
 
 
 class TestSimulationServer(object):
+    def _patch(self, *args, **kwargs):
+        self._patchers.append(mock.patch(*args, **kwargs))
+        mock_obj = self._patchers[-1].start()
+        return mock_obj
+
     @device_test
     def setup(self, context, queue):
-        self._patchers = [
-            mock.patch('katcbfsim.transport.FXSpeadTransport', FXMockTransport),
-            mock.patch('katcbfsim.transport.BeamformerSpeadTransport', BeamformerMockTransport)
-        ]
-        for patcher in self._patchers:
-            patcher.start()
+        self._patchers = []
+        self._patch('katcbfsim.transport.FXSpeadTransport', FXMockTransport)
+        self._patch('katcbfsim.transport.BeamformerSpeadTransport', BeamformerMockTransport)
+        self._telstate = mock.create_autospec(katsdptelstate.TelescopeState, instance=True)
         self._ioloop = AsyncIOMainLoop()
         self._ioloop.install()
         port = 7147
-        self._server = server.SimulatorServer(context, None, host='localhost', port=port)
+        self._server = server.SimulatorServer(
+            context, None, telstate=self._telstate, host='localhost', port=port)
         self._server.set_concurrency_options(thread_safe=False, handler_thread=False)
         self._server.set_ioloop(self._ioloop)
         self._server.start()
@@ -172,6 +177,22 @@ class TestSimulationServer(object):
         yield self.make_request('source-add', 'test2, radec, 3:33:00.00, -35:01:00.0')
         yield self.make_request('target', 'target, radec, 3:15:00.00, -36:00:00.0')
 
+    def _check_common_telstate(self):
+        self._telstate.add.assert_any_call('cbf_adc_sample_rate', 1712000000.0, True)
+        self._telstate.add.assert_any_call('cbf_bandwidth', 856000000.0, True)
+        self._telstate.add.assert_any_call('cbf_n_inputs', 4, True)
+        self._telstate.add.assert_any_call('cbf_scale_factor_timestamp', 1712000000, True)
+        self._telstate.add.assert_any_call('cbf_sync_time', mock.ANY, True)
+        self._telstate.add.assert_any_call('cbf_ticks_between_spectra', 8192, True)
+        self._telstate.add.assert_any_call('cbf_n_chans', 4096, True)
+        # Baseband frequency
+        self._telstate.add.assert_any_call('cbf_center_freq', 428000000.0, True)
+        for i in range(4):   # inputs
+            self._telstate.add.assert_any_call('cbf_input{}_fft0_shift'.format(i), mock.ANY, False)
+            self._telstate.add.assert_any_call('cbf_input{}_delay'.format(i), (0, 0, 0, 0, 0), False)
+            self._telstate.add.assert_any_call('cbf_input{}_delay_ok'.format(i), True, False)
+            self._telstate.add.assert_any_call('cbf_input{}_eq'.format(i), [200 + 0j], False)
+
     @tornado.gen.coroutine
     def _test_fx_capture(self, clock_ratio=None, min_dumps=None):
         if min_dumps is None:
@@ -190,6 +211,23 @@ class TestSimulationServer(object):
         assert_is_not_none(_current_transport)
         assert_greater_equal(_current_transport.dumps, min_dumps)
         assert_true(_current_transport.closed)
+        bls_ordering = []
+        for a in ['m062', 'm063']:
+            for b in ['m062', 'm063']:
+                if a > b:
+                    continue
+                for ap in [a + 'v', a + 'h']:
+                    for bp in [b + 'v', b + 'h']:
+                        bls_ordering.append((ap, bp))
+        self._check_common_telstate()
+        n_accs = 408 * 256   # Gives nearest to 0.5s
+        self._telstate.add.assert_any_call('cbf_bls_ordering', bls_ordering, True)
+        # 0.5 rounded to nearest acceptable interval
+        self._telstate.add.assert_any_call('cbf_int_time', n_accs * 2 * 4096 / 1712000000.0, True)
+        self._telstate.add.assert_any_call('cbf_n_accs', n_accs, True)
+        # Use assert_called_with here rather than assert_any_call, to ensure
+        # that it is the *last* call.
+        self._telstate.add.assert_called_with('sdp_cam2telstate_status', 'ready', False)
 
     @cuda_test
     @async_test
@@ -210,16 +248,29 @@ class TestSimulationServer(object):
         if min_dumps is None:
             min_dumps = 5    # Should be enough to demonstrate overlapping I/O
         yield self._configure_subarray()
-        # Use lower bandwidth to reduce test time
-        yield self.make_request('stream-create-beamformer', 'beam1', 1712000000, 1284000000, 856000000 / 4, 32768, 256, 8)
-        yield self.make_request('capture-destination', 'beam1', 'localhost:7149')
-        yield self.make_request('capture-start', 'beam1')
+        name = 'i0.tied-array-channelised-voltage.0x'
+        uname = 'i0_tied_array_channelised_voltage_0x'
+        yield self.make_request('stream-create-beamformer', name, 1712000000, 1284000000, 856000000, 4096, 256, 8)
+        yield self.make_request('capture-destination', name, 'localhost:7149', 4)
+        yield self.make_request('capture-start', name)
         for i in range(min_dumps):
             yield _current_transport.dumps_semaphore.acquire()
-        yield self.make_request('capture-stop', 'beam1')
+        yield self.make_request('capture-stop', name)
         assert_is_not_none(_current_transport)
         assert_greater_equal(_current_transport.dumps, min_dumps)
         assert_true(_current_transport.closed)
+        self._check_common_telstate()
+        print(self._telstate.add.mock_calls)
+        self._telstate.add.assert_any_call('cbf_{}_n_chans'.format(uname), 4096, False)
+        self._telstate.add.assert_any_call(
+            'cbf_{}_n_chans_per_substream'.format(uname), 1024, False)
+        self._telstate.add.assert_any_call('cbf_{}_spectra_per_heap'.format(uname), 256, True)
+        for i in range(4):   # input
+            self._telstate.add.assert_any_call(
+                'cbf_{}_input{}_weight'.format(uname, i), 1.0, False)
+        # Use assert_called_with here rather than assert_any_call, to ensure
+        # that it is the *last* call.
+        self._telstate.add.assert_called_with('sdp_cam2telstate_status', 'ready', False)
 
     @async_test
     @tornado.gen.coroutine

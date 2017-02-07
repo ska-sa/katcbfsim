@@ -194,8 +194,9 @@ class Stream(object):
         Number of antennas
     n_baselines : int, read-only
         Number of baselines (antenna pairs, not input pairs)
-    transport_factory : callable
-        Called with `self` to return a transport on which output will be sent.
+    transport_factories : list of callable
+        Each factory is called with `self` to return a transport on which
+        output will be sent.
     capturing : bool, read-only
         Whether a capture is in progress. This is true from
         :meth:`capture_start` until :meth:`capture_stop` completes, even if
@@ -206,7 +207,7 @@ class Stream(object):
         self._stop_future = None
         self.name = name
         self.subarray = subarray
-        self.transport_factory = None
+        self.transport_factories = []
         if loop is None:
             self._loop = trollius.get_event_loop()
         else:
@@ -248,7 +249,7 @@ class Stream(object):
         if self.capturing:
             logger.warn('Ignoring attempt to start capture when already running')
             return
-        if self.transport_factory is None:
+        if not self.transport_factories:
             raise IncompleteConfigError('no destination specified')
         self.subarray.capturing += 1
         # Create a future that is set by capture_stop
@@ -433,7 +434,7 @@ class FXStream(CBFStream):
         """
         if not self.subarray.antennas:
             raise IncompleteConfigError('no antennas defined')
-        if self.transport_factory is None:
+        if not self.transport_factories:
             raise IncompleteConfigError('no destination specified')
         if self.subarray.target_at(self.subarray.sync_time) is None:
             raise IncompleteConfigError('no target set')
@@ -476,7 +477,7 @@ class FXStream(CBFStream):
         return predict, data, host
 
     @trollius.coroutine
-    def _run_dump(self, index, predict_a, data_a, host_a, stream_a, io_queue_a):
+    def _run_dump(self, index, predict_a, data_a, host_a, transports_a, io_queue_a):
         """Coroutine that does all the processing for a single dump. More than
         one of these will be active at a time, and they use
         :class:`katsdpsigproc.resource.Resource` to avoid data hazards and to
@@ -484,7 +485,7 @@ class FXStream(CBFStream):
         """
         try:
             with predict_a as predict, data_a as data, host_a as host, \
-                    stream_a as stream, io_queue_a as io_queue:
+                    transports_a as transports, io_queue_a as io_queue:
                 # Prepare the predictor object.
                 # No need to wait for events on predict, because the object has its own
                 # command queue to serialise use.
@@ -523,14 +524,15 @@ class FXStream(CBFStream):
                 io_queue_a.ready()
                 # Wait for the transfer to complete
                 yield From(resource.async_wait_for_events([transfer_event], loop=self._loop))
-                logger.debug('Dump %d: transfer to host complete, waiting for stream', index)
+                logger.debug('Dump %d: transfer to host complete, waiting for transport', index)
 
                 # Send the data
-                yield From(stream_a.wait())        # Just to ensure ordering
+                yield From(transports_a.wait())        # Just to ensure ordering
                 logger.debug('Dump %d: starting transmission', index)
-                yield From(stream.send(host, index))
+                for transport in transports:
+                    yield From(transport.send(host, index))
                 host_a.ready()
-                stream_a.ready()
+                transports_a.ready()
                 logger.debug('Dump %d: complete', index)
         except Exception:
             logging.error('Dump %d: exception', index, exc_info=True)
@@ -542,23 +544,24 @@ class FXStream(CBFStream):
         """
         # Futures corresponding to _run_dump coroutine calls
         dump_futures = collections.deque()
-        transport = None
+        transports = []
         try:
-            transport = self.transport_factory(self)
-            yield From(transport.send_metadata())
+            transports = [factory(self) for factory in self.transport_factories]
+            for transport in transports:
+                yield From(transport.send_metadata())
             predict, data, host = yield From(self._loop.run_in_executor(None, self._make_predict))
             index = 0
             predict_r = resource.Resource(predict, loop=self._loop)
             io_queue_r = resource.Resource(self.context.create_command_queue(), loop=self._loop)
             data_r = [resource.Resource(x, loop=self._loop) for x in data]
             host_r = [resource.Resource(x, loop=self._loop) for x in host]
-            stream_r = resource.Resource(transport, loop=self._loop)
+            transports_r = resource.Resource(transports, loop=self._loop)
             wall_time = self._loop.time()
             while self.n_dumps is None or index < self.n_dumps:
                 predict_a = predict_r.acquire()
                 data_a = data_r[index % len(data_r)].acquire()
                 host_a = host_r[index % len(host_r)].acquire()
-                stream_a = stream_r.acquire()
+                transports_a = transports_r.acquire()
                 io_queue_a = io_queue_r.acquire()
                 # Don't start the dump coroutine until the predictor is ready.
                 # This ensures that if dumps can't keep up with the rate, then
@@ -568,7 +571,7 @@ class FXStream(CBFStream):
                 yield From(predict_a.wait_events())
                 logger.debug('Dump %d: predictor ready', index)
                 future = trollius.async(
-                    self._run_dump(index, predict_a, data_a, host_a, stream_a, io_queue_a),
+                    self._run_dump(index, predict_a, data_a, host_a, transports_a, io_queue_a),
                     loop=self._loop)
                 dump_futures.append(future)
                 # Sleep until either it is time to make the next dump, or we are asked
@@ -587,7 +590,8 @@ class FXStream(CBFStream):
                 yield From(dump_futures[0])
                 dump_futures.popleft()
             logging.info('Capture stopped by request')
-            yield From(transport.close())
+            for transport in transports:
+                yield From(transport.close())
         except Exception:
             logger.error('Exception in capture coroutine', exc_info=True)
             for future in dump_futures:
@@ -663,14 +667,15 @@ class BeamformerStream(CBFStream):
         return self.subarray.clock_ratio * self.interval
 
     @trollius.coroutine
-    def _run_dump(self, transport, index):
+    def _run_dump(self, transports, index):
         data = np.zeros((self.n_channels, self.timesteps, 2), self.dtype)
         # Stuff in some patterned values to help test decoding
         for i in range(self.timesteps):
             value = index * self.timesteps + i
             data[value % self.n_channels, value % self.timesteps, 0] = value & 0x7f
             data[value % self.n_channels, value % self.timesteps, 1] = (value >> 15) & 0x7f
-        yield From(transport.send(data, index))
+        for transport in transports:
+            yield From(transport.send(data, index))
 
     @trollius.coroutine
     def _capture(self):
@@ -680,8 +685,9 @@ class BeamformerStream(CBFStream):
         transport = None
         dump_futures = collections.deque()
         try:
-            transport = self.transport_factory(self)
-            yield From(transport.send_metadata())
+            transports = [factory(self) for factory in self.transport_factories]
+            for transport in transports:
+                yield From(transport.send_metadata())
             index = 0
             wall_time = self._loop.time()
             while self.n_dumps is None or index < self.n_dumps:
@@ -689,7 +695,7 @@ class BeamformerStream(CBFStream):
                     yield From(dump_futures[0])
                     dump_futures.popleft()
                 future = trollius.async(
-                    self._run_dump(transport, index), loop=self._loop)
+                    self._run_dump(transports, index), loop=self._loop)
                 dump_futures.append(future)
                 wall_time += self.wall_interval
                 stopped = yield From(self.wait_for_next(wall_time))
@@ -705,8 +711,10 @@ class BeamformerStream(CBFStream):
                 yield From(dump_futures[0])
                 dump_futures.popleft()
             logging.info('Capture stopped by request')
-            yield From(transport.close())
+            for transport in transports:
+                yield From(transport.close())
         except Exception:
             logger.error('Exception in capture coroutine', exc_info=True)
-            if transport is not None:
-                yield From(transport.close())
+            if transports is not None:
+                for transport in transports:
+                    yield From(transport.close())
