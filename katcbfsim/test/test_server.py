@@ -3,6 +3,7 @@
 import functools
 import mock
 import katcp
+import trollius
 import tornado.ioloop
 import tornado.locks
 import tornado.gen
@@ -64,13 +65,16 @@ class MockTransport(object):
         self.n_substreams = n_substreams
         _current_transport = self
 
+    @trollius.coroutine
     def send_metadata(self):
         pass
 
+    @trollius.coroutine
     def send(self, data, index):
         self.dumps += 1
         self.dumps_semaphore.release()
 
+    @trollius.coroutine
     def close(self):
         assert_false(self.closed)
         self.closed = True
