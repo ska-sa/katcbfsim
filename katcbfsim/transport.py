@@ -309,7 +309,7 @@ class CBFTelstateTransport(TelstateTransport):
         # Only the sensors captured by cam2telstate are simulated
         self.sensor(pre + 'adc_sample_rate', float(self.stream.adc_rate))
         self.sensor(pre + 'bandwidth', float(self.stream.bandwidth))
-        self.sensor(pre + 'scale_factor_timestamp', self.stream.scale_factor_timestamp)
+        self.sensor(pre + 'scale_factor_timestamp', float(self.stream.scale_factor_timestamp))
         self.sensor(pre + 'sync_time', self.stream.subarray.sync_time.secs)
         self.sensor(pre + 'n_inputs', 2 * self.stream.n_antennas)
 
