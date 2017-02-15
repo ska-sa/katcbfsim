@@ -18,6 +18,31 @@ from .stream import (Subarray, FXStream, BeamformerStream,
 logger = logging.getLogger(__name__)
 
 
+def to_tornado_future(trollius_future, loop=None):
+    """Modified version of :func:`tornado.platform.asyncio.to_tornado_future`
+    that is a bit more robust: it allows taking a coroutine rather than a
+    future, it passes through error tracebacks, and if a future is cancelled it
+    properly propagates the CancelledError.
+    """
+    f = trollius.ensure_future(trollius_future, loop=loop)
+    tf = tornado.concurrent.Future()
+    def copy(future):
+        assert future is f
+        if f.cancelled():
+            tf.set_exception(trollius.CancelledError())
+        elif hasattr(f, '_get_exception_tb') and f._get_exception_tb() is not None:
+            # Note: f.exception() clears the traceback, so must retrieve it first
+            tb = f._get_exception_tb()
+            exc = f.exception()
+            tf.set_exc_info((type(exc), exc, tb))
+        elif f.exception() is not None:
+            tf.set_exception(f.exception())
+        else:
+            tf.set_result(f.result())
+    f.add_done_callback(copy)
+    return tf
+
+
 def _stream_request(wrapped):
     """Decorator for per-stream commands. It looks up the stream and passes
     it to the wrapped function, or returns a failure message if it does not
@@ -108,8 +133,9 @@ class SimulatorServer(katcp.DeviceServer):
     subarray : :class:`katcbfsim.stream.Subarray`, optional
         Preconfigured subarray. If not specified, an unconfigured subarray is created.
     telstate : :class:`katsdptelstate.TelescopeState`, optional
-        Telescope state used for the :samp:`?configure-subarray-from-telstate`.
-        If not provided, that request will fail.
+        Telescope state used for the :samp:`?configure-subarray-from-telstate`
+        and populated with sensors. If not provided, that request will fail,
+        and no telstate sensors will be provided.
     *args, **kwargs :
         Passed to base class
     """
@@ -211,11 +237,21 @@ class SimulatorServer(katcp.DeviceServer):
             while n_substreams < max(len(endpoints), stream.n_antennas * 4):
                 n_substreams *= 2
         if isinstance(stream, FXStream):
-            stream.transport_factory = \
+            stream.transport_factories = [
                 transport.FXSpeadTransport.factory(endpoints, n_substreams, max_packet_size)
+            ]
+            if self._telstate is not None:
+                stream.transport_factories.append(
+                    transport.FXTelstateTransport.factory(
+                        self._telstate, n_substreams))
         elif isinstance(stream, BeamformerStream):
-            stream.transport_factory = \
+            stream.transport_factories = [
                 transport.BeamformerSpeadTransport.factory(endpoints, n_substreams, max_packet_size)
+            ]
+            if self._telstate is not None:
+                stream.transport_factories.append(
+                    transport.BeamformerTelstateTransport.factory(
+                        self._telstate, n_substreams, stream_name=stream.name))
         else:
             raise UnsupportedStreamError('unknown stream type')
 
@@ -240,7 +276,7 @@ class SimulatorServer(katcp.DeviceServer):
     def request_capture_destination_file(self, sock, stream, destination):
         """Set the destination to an HDF5 file"""
         if isinstance(stream, FXStream):
-            stream.transport_factory = transport.FXFileTransport.factory(destination)
+            stream.transport_factories = [transport.FXFileTransport.factory(destination)]
         else:
             return 'fail', 'file capture not supported for this stream type'
         return 'ok',
@@ -254,7 +290,7 @@ class SimulatorServer(katcp.DeviceServer):
         for name, stream in self._streams.items():
             if req_name == '' or req_name == name:
                 try:
-                    endpoints = stream.transport_factory.endpoints
+                    endpoints = stream.transport_factories[0].endpoints
                 except AttributeError:
                     endpoints = [Endpoint('0.0.0.0', 0)]
                 endpoints_str = endpoints_to_str(endpoints)
@@ -466,7 +502,7 @@ class SimulatorServer(katcp.DeviceServer):
         except KeyError:
             raise tornado.gen.Return(('fail', 'requested stream name "{}" not found'.format(name)))
         stop = trollius.async(stream.capture_stop())
-        yield tornado.platform.asyncio.to_tornado_future(stop)
+        yield to_tornado_future(stop)
         raise tornado.gen.Return(('ok',))
 
     @tornado.gen.coroutine
@@ -474,7 +510,7 @@ class SimulatorServer(katcp.DeviceServer):
         self._halting = True  # Prevents changes to _streams while we iterate
         for stream in self._streams.values():
             stop = trollius.async(stream.capture_stop())
-            yield tornado.platform.asyncio.to_tornado_future(stop)
+            yield to_tornado_future(stop)
         yield tornado.gen.maybe_future(super(SimulatorServer, self).request_halt(req, msg))
 
     request_halt.__doc__ = katcp.DeviceServer.request_halt.__doc__
