@@ -230,6 +230,7 @@ class SimulatorServer(katcp.DeviceServer):
                                    n_channels, timesteps, sample_bits)
         return 'ok',
 
+    @tornado.gen.coroutine
     def set_destination(self, stream, endpoints, n_substreams=None, max_packet_size=None):
         if n_substreams is None:
             # Formula used by MeerKAT CBF
@@ -254,20 +255,22 @@ class SimulatorServer(katcp.DeviceServer):
                         self._telstate, n_substreams, stream_name=stream.name))
         else:
             raise UnsupportedStreamError('unknown stream type')
+        yield to_tornado_future(trollius.ensure_future(stream.send_metadata(), loop=stream.loop))
 
     @request(Str(), Str(), Int(optional=True), Int(optional=True))
     @return_reply()
     @_stream_exceptions
     @_stream_request
+    @tornado.gen.coroutine
     def request_capture_destination(self, sock, stream, destination, n_substreams=None,
                                     max_packet_size=None):
         """Set the destination endpoints for a stream"""
         endpoints = endpoint_list_parser(None)(destination)
         for e in endpoints:
             if e.port is None:
-                return 'fail', 'no port specified'
+                raise tornado.gen.Return(('fail', 'no port specified'))
         self.set_destination(stream, endpoints, n_substreams, max_packet_size)
-        return 'ok',
+        raise tornado.gen.Return(('ok',))
 
     @request(Str(), Str())
     @return_reply()

@@ -65,6 +65,7 @@ class TelstateSubarray(Subarray):
         return super(TelstateSubarray, self).position_at(timestamp)
 
 
+@tornado.gen.coroutine
 def prepare_server(server, args):
     """Do server configuration specified by command-line configuration"""
     for antenna in args.cbf_antennas:
@@ -90,9 +91,9 @@ def prepare_server(server, args):
             args.cbf_adc_sample_rate, args.cbf_center_freq, args.cbf_bandwidth,
             args.cbf_channels)
         server.set_accumulation_length(stream, args.cbf_int_time)
-        server.set_destination(stream, args.cbf_spead, args.cbf_substreams, args.max_packet_size)
         if args.dumps:
             server.set_n_dumps(stream, args.dumps)
+        yield server.set_destination(stream, args.cbf_spead, args.cbf_substreams, args.max_packet_size)
         if args.start:
             server.capture_start(stream)
     if args.create_beamformer_stream is not None:
@@ -100,9 +101,9 @@ def prepare_server(server, args):
             args.create_beamformer_stream,
             args.cbf_adc_sample_rate, args.cbf_center_freq, args.cbf_bandwidth,
             args.cbf_channels, args.beamformer_timesteps, args.beamformer_bits)
-        server.set_destination(stream, args.cbf_spead, args.cbf_substreams, args.max_packet_size)
         if args.dumps:
             server.set_n_dumps(stream, args.dumps)
+        yield server.set_destination(stream, args.cbf_spead, args.cbf_substreams, args.max_packet_size)
         if args.start:
             server.capture_start(stream)
 
@@ -115,6 +116,29 @@ def configure_logging(level):
     sh.setFormatter(formatter)
     logging.root.addHandler(sh)
     logging.root.setLevel(level.upper())
+
+
+@tornado.gen.coroutine
+def async_main(ioloop, args):
+    try:
+        context = accel.create_some_context(interactive=False)
+    except:
+        logging.warn('Could not create a device context. FX simulation will not be possible')
+        context = None
+    if args.telstate is not None:
+        subarray = TelstateSubarray(args.telstate)
+    else:
+        subarray = Subarray()
+    subarray.clock_ratio = args.cbf_sim_clock_ratio
+    server = katcbfsim.server.SimulatorServer(context, subarray, telstate=args.telstate, host=args.host, port=args.port)
+    yield prepare_server(server, args)
+    server.set_concurrency_options(thread_safe=False, handler_thread=False)
+    server.set_ioloop(ioloop)
+    trollius.get_event_loop().add_signal_handler(signal.SIGINT,
+        lambda: trollius.async(on_shutdown(server)))
+    trollius.get_event_loop().add_signal_handler(signal.SIGTERM,
+        lambda: trollius.async(on_shutdown(server)))
+    ioloop.add_callback(server.start)
 
 
 def main():
@@ -150,27 +174,9 @@ def main():
         parser.error('--start requires --create-fx-stream or --create-beamformer-stream')
     configure_logging(args.log_level)
 
-    try:
-        context = accel.create_some_context(interactive=False)
-    except:
-        logging.warn('Could not create a device context. FX simulation will not be possible')
-        context = None
     ioloop = AsyncIOMainLoop()
     ioloop.install()
-    if args.telstate is not None:
-        subarray = TelstateSubarray(args.telstate)
-    else:
-        subarray = Subarray()
-    subarray.clock_ratio = args.cbf_sim_clock_ratio
-    server = katcbfsim.server.SimulatorServer(context, subarray, telstate=args.telstate, host=args.host, port=args.port)
-    prepare_server(server, args)
-    server.set_concurrency_options(thread_safe=False, handler_thread=False)
-    server.set_ioloop(ioloop)
-    trollius.get_event_loop().add_signal_handler(signal.SIGINT,
-        lambda: trollius.async(on_shutdown(server)))
-    trollius.get_event_loop().add_signal_handler(signal.SIGTERM,
-        lambda: trollius.async(on_shutdown(server)))
-    ioloop.add_callback(server.start)
+    ioloop.add_callback(async_main, ioloop, args)
     trollius.get_event_loop().run_forever()
 
 if __name__ == '__main__':

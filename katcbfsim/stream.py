@@ -206,6 +206,7 @@ class Stream(object):
     """
     def __init__(self, subarray, name, loop=None):
         self._capture_future = None
+        self._metadata_future = None
         self._stop_future = None
         self.name = name
         self.subarray = subarray
@@ -275,6 +276,23 @@ class Stream(object):
         self._stop_future = None
         self._capture_future = None
         self.subarray.capturing -= 1
+
+    @trollius.coroutine
+    def send_metadata(self):
+        """Send metadata on all transports.
+
+        This instantiates temporary copies of the transports, which are
+        destroyed as soon as the metadata is sent. It is intended to be used
+        when capturing is not in progress.
+        """
+        transports = []
+        try:
+            transports = [factory(self) for factory in self.transport_factories]
+            futures = [t.send_metadata() for t in transports]
+            yield From(trollius.gather(*futures, loop=self.loop))
+        finally:
+            for t in transports:
+                yield From(t.close())
 
     @trollius.coroutine
     def wait_for_next(self, wall_time):
