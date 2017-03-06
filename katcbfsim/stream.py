@@ -206,7 +206,6 @@ class Stream(object):
     """
     def __init__(self, subarray, name, loop=None):
         self._capture_future = None
-        self._metadata_future = None
         self._stop_future = None
         self.name = name
         self.subarray = subarray
