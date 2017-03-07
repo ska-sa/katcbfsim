@@ -478,6 +478,22 @@ class SimulatorServer(katcp.DeviceServer):
         self.configure_subarray_from_telstate()
         return 'ok',
 
+    @tornado.gen.coroutine
+    def send_metadata(self, stream):
+        yield to_tornado_future(trollius.ensure_future(stream.send_metadata(), loop=stream.loop))
+
+    @request(Str())
+    @return_reply()
+    @_stream_exceptions
+    @_stream_request
+    @tornado.gen.coroutine
+    def request_capture_meta(self, sock, stream):
+        """Send metadata for a stream"""
+        if self._halting:
+            return 'fail', 'cannot send metadata while halting'
+        self.send_metadata(stream)
+        return 'ok',
+
     def capture_start(self, stream):
         stream.capture_start()
 
