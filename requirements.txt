@@ -4,6 +4,7 @@ backports.ssl-match-hostname
 certifi
 Cython
 decorator
+fakeredis
 funcsigs
 futures
 h5py
