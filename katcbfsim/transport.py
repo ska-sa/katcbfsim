@@ -128,6 +128,7 @@ class FXSpeadTransport(CBFSpeadTransport):
 
     @trollius.coroutine
     def send(self, vis, dump_index):
+        yield From(self.send_metadata())
         assert vis.flags.c_contiguous, 'Visibility array must be contiguous'
         shape = (self.stream.n_channels, self.stream.n_baselines * 4, 2)
         substream_channels = self.stream.n_channels // self.n_substreams
@@ -214,6 +215,7 @@ class BeamformerSpeadTransport(CBFSpeadTransport):
 
     @trollius.coroutine
     def send(self, beam_data, index):
+        yield From(self.send_metadata())
         substream_channels = self.stream.n_channels // self.n_substreams
         timestamp = index * self.stream.timesteps * self.stream.n_channels * \
                 self.stream.scale_factor_timestamp // self.stream.bandwidth
