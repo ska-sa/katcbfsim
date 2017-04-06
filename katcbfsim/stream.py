@@ -489,7 +489,7 @@ class FXStream(CBFStream):
         # for now it is just real and diagonal.
         gain_host = predict.buffer('gain').empty_like()
         gain_host.fill(0)
-        baseline_gain = self.subarray.gain * self.bandwidth / self.n_channels * self.accumulation_length
+        baseline_gain = self.subarray.gain * self.bandwidth / self.n_channels * self.accumulation_length / self.n_accs
         antenna_gain = math.sqrt(baseline_gain)
         gain_host[:, :, 0, 0].fill(antenna_gain)
         gain_host[:, :, 1, 1].fill(antenna_gain)
