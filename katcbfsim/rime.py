@@ -235,7 +235,11 @@ class Rime(accel.Operation):
         ra = np.array(ra)
         dec = np.array(dec)
         l, m, n = self.phase_center.lmn(ra, dec, self.time, ref_antenna)
-        self._scaled_phase_host[:] = -2 * (np.outer(l, u) + np.outer(m, v) + np.outer(n - 1, w))
+        # This is the opposite sign to Smirnov's RIME paper, because MeerKAT
+        # uses the opposite convention for the phase of the electric field (it
+        # treats phase as increasing with time, decreasing with distance from
+        # the source).
+        self._scaled_phase_host[:] = 2 * (np.outer(l, u) + np.outer(m, v) + np.outer(n - 1, w))
         self._scaled_phase.set_async(self.command_queue, self._scaled_phase_host)
 
     def _run_predict(self):
