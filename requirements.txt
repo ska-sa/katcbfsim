@@ -11,6 +11,7 @@ h5py
 katcp
 katversion
 ipaddress==1.0.17
+jsonschema==2.5.1
 linecache2
 Mako
 MarkupSafe
