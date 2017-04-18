@@ -46,7 +46,7 @@ class Subarray(object):
     ----------
     antennas : list of :class:`katpoint.Antenna`
         The antennas in the simulated array.
-    sources : list of :class:`katpoint.Target`
+    sources : list of :class:`katcbfsim.source.Source`
         The simulated sources. Only point sources are currently supported.
         The do not necessarily have to be radec targets, and the position
         and flux model can safely be changed on the fly.
@@ -97,7 +97,7 @@ class Subarray(object):
 
         Parameters
         ----------
-        source : :class:`katpoint.Target`
+        source : :class:`katcbfsim.source.Source`
             New source
 
         Raises
@@ -109,6 +109,7 @@ class Subarray(object):
             raise CaptureInProgressError('cannot add source while capture is in progress')
         if source.flux_model is None:
             logging.warn('source has no flux model; it will be assumed to be 1 Jy')
+            source.flux_model = katpoint.FluxDensityModel(0.0, np.inf, [])
         self.sources.append(source)
 
     def ensure_source(self, timestamp):
@@ -121,7 +122,7 @@ class Subarray(object):
             Time at which to look up the target
         """
         if not self.sources:
-            self.sources.append(self.target_at(timestamp))
+            self.sources.append(Source(self.target_at(timestamp)))
 
     @property
     def sync_time(self):

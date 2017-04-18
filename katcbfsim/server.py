@@ -14,6 +14,7 @@ import katcbfsim
 from . import transport
 from .stream import (Subarray, FXStream, BeamformerStream,
                      CaptureInProgressError, IncompleteConfigError, UnsupportedStreamError)
+from .source import Source
 
 logger = logging.getLogger(__name__)
 
@@ -437,8 +438,9 @@ class SimulatorServer(katcp.DeviceServer):
     @return_reply()
     @_stream_exceptions
     def request_source_add(self, sock, source_str):
-        """Add a source to the sky model, in the format accepted by katpoint."""
-        self.add_source(katpoint.Target(source_str))
+        """Add a source to the sky model, in the format accepted by
+        :class:`katcbfsim.source.Source`."""
+        self.add_source(Source(source_str))
         return 'ok',
 
     @request()

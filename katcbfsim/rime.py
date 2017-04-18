@@ -120,7 +120,7 @@ class Rime(accel.Operation):
         # Set up internal arrays
         self._scaled_phase = accel.DeviceArray(command_queue.context, (n_sources, n_antennas), np.float32)
         self._scaled_phase_host = self._scaled_phase.empty_like()
-        self._flux_models = np.empty((n_channels, n_sources), np.float32)
+        self._flux_models = np.empty((n_channels, n_sources, 4), np.float32)
         self._flux_density = accel.DeviceArray(command_queue.context, (n_channels, n_sources, 2, 2), np.complex64)
         self._flux_density_host = self._flux_density.empty_like()
         self._flux_sum = accel.DeviceArray(command_queue.context, (n_channels, 2), np.float32)
@@ -171,14 +171,10 @@ class Rime(accel.Operation):
         for channel, freq in enumerate(self.frequencies):
             freq_MHz = freq / 1e6  # katpoint takes freq in MHz
             for i, source in enumerate(self.sources):
-                if source.flux_model is None:
-                    fd = 1.0
-                else:
-                    fd = source.flux_model.flux_density(freq_MHz)
-                    # Assume zero emission outside the defined frequency range.
-                    if np.isnan(fd):
-                        fd = 0.0
-                self._flux_models[channel, i] = fd
+                fd = source.flux_density_stokes(freq_MHz)
+                # Assume zero emission outside the defined frequency range.
+                fd[np.isnan(fd)] = 0.0
+                self._flux_models[channel, i, :] = fd
         logger.debug('Flux models updated')
 
     def _update_flux_density(self):
@@ -204,17 +200,32 @@ class Rime(accel.Operation):
             if abs(angles[i]) < 1e-30:
                 angles[i] = 1e-30
 
+        # Maps Stokes parameters to linear feed coherencies. This is
+        # basically a Mueller matrix, but shaped to give 2x2 rather than
+        # 4x1 output.
+        stokes = np.zeros((4, 2, 2), np.complex64)
+        # I
+        stokes[0, 0, 0] = 1
+        stokes[0, 1, 1] = 1
+        # Q
+        stokes[1, 0, 0] = 1
+        stokes[1, 1, 1] = -1
+        # U
+        stokes[2, 0, 1] = 1
+        stokes[2, 1, 0] = 1
+        # V
+        stokes[3, 0, 1] = 1j
+        stokes[3, 1, 0] = -1j
         for channel, freq in enumerate(self.frequencies):
             x = np.sin(angles) * airy_scale * freq
             beam = (2 * scipy.special.j1(x) / x)**2
-            fd = self._flux_models[channel, :] * beam
-            self._flux_density_host[channel, :, 0, 0] = fd
-            self._flux_density_host[channel, :, 0, 1] = 0.0
-            self._flux_density_host[channel, :, 1, 0] = 0.0
-            self._flux_density_host[channel, :, 1, 1] = fd
-            fd_sum = fd.sum()
-            self._flux_sum_host[channel, 0] += fd_sum
-            self._flux_sum_host[channel, 1] += fd_sum
+            fd = self._flux_models[channel, ...] * beam[..., np.newaxis]
+            # Convert from IQUV to coherencies
+            fd = np.einsum('ij,jkl', fd, stokes)
+            self._flux_density_host[channel, ...] = fd
+            fd_sum = fd.sum(axis=0)
+            self._flux_sum_host[channel, 0] += fd_sum[0, 0].real
+            self._flux_sum_host[channel, 1] += fd_sum[1, 1].real
         logger.debug('Host flux densities updated')
         self._flux_density.set_async(self.command_queue, self._flux_density_host)
         self._flux_sum.set_async(self.command_queue, self._flux_sum_host)
