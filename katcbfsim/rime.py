@@ -7,6 +7,7 @@ import katpoint
 import logging
 import scipy.special
 from katsdpsigproc import accel, tune
+from .source import Source
 
 
 logger = logging.getLogger(__name__)
@@ -40,7 +41,7 @@ class RimeTemplate(object):
         n_sources = 32
         n_accs = 1024
         sefd = 20.0
-        sources = [katpoint.construct_radec_target(0, 0)] * n_sources
+        sources = [Source(katpoint.construct_radec_target(0, 0))] * n_sources
         antennas = [katpoint.Antenna('Antenna {}'.format(i),
                                      '-34:00:00', '20:00:00', '0.0', 10.0, (i, 0, 0))
                     for i in range(n_antennas)]
