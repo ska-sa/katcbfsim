@@ -6,7 +6,7 @@ Cython
 decorator
 fakeredis
 funcsigs
-functools==3.2.3-2
+functools32==3.2.3-2
 futures
 h5py
 katcp
