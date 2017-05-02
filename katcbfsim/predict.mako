@@ -23,6 +23,7 @@
  * @param flux_density    Jones brightness matrices for point source apparent brightness, frequency-major
  * @param inv_wavelength  Inverse of wavelength per channel, in per-metre
  * @param scaled_phase    -2(ul + vm + w(n-1)) per antenna per source (source-major), in metres
+ * @param die             Jones matrix for direction-independent effects per antenna, frequency-major
  * @param baselines       Indices of the two antennas for each baseline
  * @param sefd            System Equivalent Flux Density (assumed to be unpolarised)
  * @param n_sources       Number of point sources
@@ -36,6 +37,8 @@ KERNEL void predict(
     int flux_stride,
     const GLOBAL float * RESTRICT inv_wavelength,
     const GLOBAL float * RESTRICT scaled_phase,
+    const GLOBAL jones * RESTRICT die,
+    int die_stride,
     const GLOBAL short2 * RESTRICT baselines,
     float sefd,
     int n_sources,
@@ -69,6 +72,14 @@ KERNEL void predict(
         BARRIER();
     }
 
+    // Apply direction-independent effects
     if (b < n_baselines)
+    {
+        int offset = f * die_stride;
+        jones gp = die[offset + p];
+        jones gq = die[offset + q];
+        sum = jones_mul(gp, sum);
+        sum = jones_mul_h(sum, gq);
         out[f * out_stride + b] = sum;
+    }
 }

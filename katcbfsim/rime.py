@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class RimeTemplate(object):
-    autotune_version = 3
+    autotune_version = 4
 
     def __init__(self, context, max_antennas, tuning=None):
         self.context = context
@@ -47,21 +47,24 @@ class RimeTemplate(object):
                     for i in range(n_antennas)]
         # The values are irrelevant, we just need the memory to be there.
         out = accel.DeviceArray(context, (n_channels, n_baselines, 2, 2, 2), np.int32)
-        gain = accel.DeviceArray(context, (n_channels, n_antennas, 2, 2), np.complex64)
         def generate_predict(predict_wgs):
             tuning = dict(predict_wgs=predict_wgs, sample_wgs=256, sample_rows=64)
             fn = cls(context, max_antennas, tuning).instantiate(
                 queue, 1284000000.0, 856000000.0, n_channels, n_accs, sources, antennas, sefd)
-            fn.bind(out=out, gain=gain)
+            fn.bind(out=out)
             fn._update_scaled_phase()
+            fn._update_die()
             queue.finish()  # _update_scaled_phase is asynchronous
             return tune.make_measure(queue, fn._run_predict)
         def generate_sample(sample_wgs, sample_rows):
             tuning = dict(predict_wgs=64, sample_wgs=sample_wgs, sample_rows=sample_rows)
             fn = cls(context, max_antennas, tuning).instantiate(
                 queue, 1284000000.0, 856000000.0, n_channels, n_accs, sources, antennas, sefd)
-            fn.bind(out=out, gain=gain)
+            fn.bind(out=out)
+            fn.gain[..., 0, 0].fill(1)
+            fn.gain[..., 1, 1].fill(1)
             fn._update_scaled_phase()
+            fn._update_die()
             fn._run_predict()
             queue.finish()  # _update_scaled_phase is asynchronous
             return tune.make_measure(queue, fn._run_sample)
@@ -104,7 +107,6 @@ class Rime(accel.Operation):
         self.position = None
         _2 = accel.Dimension(2, exact=True)
         self.slots['out'] = accel.IOSlot((n_channels, n_baselines, _2, _2, _2), np.int32)
-        self.slots['gain'] = accel.IOSlot((n_channels, n_antennas, _2, _2), np.complex64)
         self.predict_kernel = template.predict_program.get_kernel('predict')
         self.sample_kernel = template.sample_program.get_kernel('sample')
         # Set up the inverse wavelength lookup table
@@ -118,28 +120,35 @@ class Rime(accel.Operation):
         inv_wavelength = self._inv_wavelength.empty_like()
         inv_wavelength[:] = (self.frequencies / katpoint.lightspeed).astype(np.float32)
         self._inv_wavelength.set(command_queue, inv_wavelength)
-        # Set up internal arrays
+        # Set up internal arrays.
+        # TODO: these should have slots too, to give the caller control over aliasing etc.
         self._scaled_phase = accel.DeviceArray(command_queue.context, (n_sources, n_antennas), np.float32)
         self._scaled_phase_host = self._scaled_phase.empty_like()
         self._flux_models = np.empty((n_channels, n_sources, 4), np.float32)
         self._flux_density = accel.DeviceArray(command_queue.context, (n_channels, n_sources, 2, 2), np.complex64)
         self._flux_density_host = self._flux_density.empty_like()
-        self._flux_sum = accel.DeviceArray(command_queue.context, (n_channels, 2), np.float32)
-        self._flux_sum_host = self._flux_sum.empty_like()
+        # Combination of all direction-independent effects
+        self._die = accel.DeviceArray(command_queue.context, (n_channels, n_antennas, 2, 2), np.complex64)
+        self._die_host = self._die.empty_like()
+        # Antenna effects (bandpass, gain, polarization leakage) *after* feed rotation
+        self.gain = np.zeros((n_channels, n_antennas, 2, 2), np.complex64)
         # Set up the internal baseline mapping
         # TODO: this could live in the template
         self._baselines = accel.DeviceArray(command_queue.context, (n_padded_baselines, 2), np.int16)
+        self._autocorrs = accel.DeviceArray(command_queue.context, (n_antennas,), np.int32)
         baselines_host = self._baselines.empty_like()
+        autocorrs_host = self._autocorrs.empty_like()
         next_baseline = 0
         baselines_host.fill(0)
         for i in range(n_antennas):
+            autocorrs_host[i] = next_baseline
             for j in range(i, n_antennas):
                 baselines_host[next_baseline, 0] = i
                 baselines_host[next_baseline, 1] = j
                 next_baseline += 1
         self._baselines.set(command_queue, baselines_host)
+        self._autocorrs.set(command_queue, autocorrs_host)
         self._sample_flux_models()
-        self.command_queue.finish()  # _update_flush_density is asynchronous
 
     def set_time(self, time):
         """Set the time for which the visibilities are simulated.
@@ -185,8 +194,7 @@ class Rime(accel.Operation):
         This performs an **asynchronous** transfer to the GPU, and the caller
         must wait for it to complete before calling the function again.
         """
-        logger.debug('Starting _update_flex_density')
-        self._flux_sum_host.fill(self.sefd)
+        logger.debug('Starting _update_flux_density')
         position = self.position or self.phase_center
 
         # Determine scaling factor for Airy function
@@ -224,12 +232,8 @@ class Rime(accel.Operation):
             # Convert from IQUV to coherencies
             fd = np.einsum('ij,jkl', fd, stokes)
             self._flux_density_host[channel, ...] = fd
-            fd_sum = fd.sum(axis=0)
-            self._flux_sum_host[channel, 0] += fd_sum[0, 0].real
-            self._flux_sum_host[channel, 1] += fd_sum[1, 1].real
         logger.debug('Host flux densities updated')
         self._flux_density.set_async(self.command_queue, self._flux_density_host)
-        self._flux_sum.set_async(self.command_queue, self._flux_sum_host)
 
     def _update_scaled_phase(self):
         """Compute the propagation delay phase for each source and antenna.
@@ -247,12 +251,23 @@ class Rime(accel.Operation):
         ra = np.array(ra)
         dec = np.array(dec)
         l, m, n = self.phase_center.lmn(ra, dec, self.time, ref_antenna)
-        # This is the opposite sign to Smirnov's RIME paper, because MeerKAT
-        # uses the opposite convention for the phase of the electric field (it
-        # treats phase as increasing with time, decreasing with distance from
-        # the source).
+        # This is the opposite sign to Smirnov's RIME paper. The sign in that
+        # paper is incorrect.
         self._scaled_phase_host[:] = 2 * (np.outer(l, u) + np.outer(m, v) + np.outer(n - 1, w))
         self._scaled_phase.set_async(self.command_queue, self._scaled_phase_host)
+
+    def _update_die(self):
+        """Compute combined direction-independent effects."""
+        P = np.empty((1, len(self.antennas), 2, 2), np.float32)
+        for i, antenna in enumerate(self.antennas):
+            angle = self.phase_center.parallactic_angle(self.time, antenna)
+            c = np.cos(angle)
+            s = np.sin(angle)
+            # MeerKAT uses the opposite handedness for V, H than IEEE x, y, so
+            # we have to negate H.
+            P[0, i] = [[c, s], [s, -c]]
+        np.matmul(self.gain, P, out=self._die_host)
+        self._die.set_async(self.command_queue, self._die_host)
 
     def _run_predict(self):
         out = self.buffer('out')
@@ -268,6 +283,8 @@ class Rime(accel.Operation):
                 np.int32(self._flux_density.padded_shape[1]),
                 self._inv_wavelength.buffer,
                 self._scaled_phase.buffer,
+                self._die.buffer,
+                np.int32(self._die.padded_shape[1]),
                 self._baselines.buffer,
                 np.float32(self.sefd),
                 np.int32(n_sources),
@@ -280,7 +297,6 @@ class Rime(accel.Operation):
 
     def _run_sample(self):
         out = self.buffer('out')
-        gain = self.buffer('gain')
         n_antennas = len(self.antennas)
         n_baselines = n_antennas * (n_antennas + 1) // 2
         self.command_queue.enqueue_kernel(
@@ -288,10 +304,8 @@ class Rime(accel.Operation):
             [
                 out.buffer,
                 np.int32(out.padded_shape[1]),
-                self._flux_sum.buffer,
-                gain.buffer,
-                np.int32(gain.padded_shape[1]),
                 self._baselines.buffer,
+                self._autocorrs.buffer,
                 np.int32(self.n_channels),
                 np.int32(n_baselines),
                 np.float32(self.n_accs),
@@ -309,6 +323,8 @@ class Rime(accel.Operation):
         self._update_scaled_phase()
         logger.debug('Updating perceived flux densities')
         self._update_flux_density()
+        logger.debug('Updating direction-independent effects')
+        self._update_die()
         transfer_event = self.command_queue.enqueue_marker()
         logger.debug('Marker enqueued')
 

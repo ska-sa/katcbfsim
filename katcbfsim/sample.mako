@@ -31,7 +31,7 @@ typedef union
 /**
  * This kernel combines several operations:
  * - Sample visibilities from a statistical distribution.
- * - Apply per-antenna gains.
+ * - Apply per-antenna direction-independent effects.
  * - Quantise to integer.
  *
  * The sampling ignores correlation between visibilities, and generates each
@@ -42,9 +42,8 @@ typedef union
  *
  * @param [in,out] data   On input, expected value for a single correlation product. On output, a sample for the accumulated visibility. Frequency-major.
  * @param data_stride     Element stride for @a data
- * @param flux_sum        Diagonal elements of sum of all the brightness matrices and the system equivalent flux density, indexed by frequency
- * @param gain            Jones matrix per antenna, frequency-major
  * @param baselines       Indices of the two antennas for each baseline
+ * @param autocorrs       Baseline indices for autocorrelations
  * @param n_channels      Number of frequencies
  * @param n_antennas      Number of antennas
  * @param n_accs          Number of correlations being summed (in simulation)
@@ -54,10 +53,8 @@ typedef union
 KERNEL void sample(
     GLOBAL in_out * RESTRICT data,
     int data_stride,
-    const GLOBAL float2 * RESTRICT flux_sum,
-    const GLOBAL jones * RESTRICT gain,
-    int gain_stride,
     const GLOBAL short2 * RESTRICT baselines,
+    const GLOBAL int * RESTRICT autocorrs,
     int n_channels,
     int n_baselines,
     float n_accs,
@@ -72,6 +69,8 @@ KERNEL void sample(
     short2 pq = baselines[b];
     int p = pq.x;
     int q = pq.y;
+    int p_bl = autocorrs[p];
+    int q_bl = autocorrs[q];
 
     /* Using sequence seems to be unspeakably slow, even for small numbers of
      * threads. We'll just ensure that every thread has a unique seed and not
@@ -87,16 +86,24 @@ KERNEL void sample(
 
     for (; f < n_channels; f += f_step)
     {
-        float2 flux_sum_tmp = flux_sum[f];
-        float flux_sum_parts[2] = {flux_sum_tmp.x, flux_sum_tmp.y};
-        int data_idx = f * data_stride + b;
+        int data_offset = f * data_stride;
+        float diag_p[2], diag_q[2];
+        // TODO: this isn't the best access pattern. It may be better to use a
+        // separate kernel to extract the autocorrelations.
+        diag_p[0] = data[data_offset + p_bl].in.m[0][0].x;
+        diag_p[1] = data[data_offset + p_bl].in.m[1][1].x;
+        diag_q[0] = data[data_offset + q_bl].in.m[0][0].x;
+        diag_q[1] = data[data_offset + q_bl].in.m[1][1].x;
+        int data_idx = data_offset + b;
+        // TODO: moving the load of 'predict' inside the loop would reduce
+        // register pressure (but also reduce latency hiding).
         jones predict = data[data_idx].in;
         jones sample;
         for (int i = 0; i < 2; i++)
             for (int j = 0; j < 2; j++)
             {
                 // TODO: could precompute A.
-                float A = 0.5f * n_accs * flux_sum_parts[i] * flux_sum_parts[j];
+                float A = 0.5f * n_accs * diag_p[i] * diag_q[j];
                 float B = 0.5f * n_accs * (sqr(predict.m[i][j].x) - sqr(predict.m[i][j].y));
                 float rr = A + B;
                 float ii = A - B;
@@ -116,7 +123,8 @@ KERNEL void sample(
                 sample.m[i][j].y = n_accs * predict.m[i][j].y + l_ri * norm.x + l_ii * norm.y;
             }
 
-        /* Autocorrelations must be Hermitian.
+        /* Autocorrelations must be Hermitian. This needs to be done before
+         * applying direction-independent effects.
          * TODO: probably more efficient to have a separate kernel
          * to fix up the autocorrelations afterwards.
          */
@@ -128,9 +136,6 @@ KERNEL void sample(
             sample.m[1][0].y = -sample.m[0][1].y;
         }
 
-        // Apply gains
-        int offset = f * gain_stride;
-        sample = jones_mul_h(jones_mul(gain[offset + p], sample), gain[offset + q]);
         // Quantise to integer
         ijones quant;
         for (int i = 0; i < 2; i++)
