@@ -30,7 +30,7 @@ class Source(katpoint.Target):
     string, in which extra information is encoded as a JSON dictionary and
     prepended to the target string. For example::
 
-        {"Q": 0.3, "U": 0.2, "V": -0.1} radec, 0:02:00.00, -30:00:00.0, (100.0 2000.0 1.0)
+        {"Q": 0.3, "U": 0.2, "V": -0.1} name, radec, 0:02:00.00, -30:00:00.0, (100.0 2000.0 1.0)
 
     indicates a source where Stokes Q, U and V are found by multiplying Stokes
     I by the corresponding scale factors. At present these are the only valid

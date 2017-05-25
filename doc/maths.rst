@@ -32,8 +32,8 @@ The covariance matrix of these elements has some important properties:
 
  - Noise terms are assumed to be uncorrelated with everything.
 
- - The statistical distribution is stationary (time-independent), which means
-   that expectations are invariant under a global phase shift. From this is can
+ - Applying the same phase shift to all voltages does not affect the
+   distribution (i.e., it is circular). From this it can
    be deduced that :math:`E[a_p] = E[b_p] = 0`, :math:`E[(a_p^j)^2] =
    E[(b_p^j)^2]` and :math:`E[a_p^jb_p^j] = 0` (and similarly for :math:`c` and
    :math:`d`); and :math:`E[a_pa_q] = E[b_pb_q]`, :math:`E[a_pb_q] =
