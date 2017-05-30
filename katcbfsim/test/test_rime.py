@@ -95,12 +95,7 @@ class TestRime(object):
         fn.bind(out=out_data)
         fn.ensure_all_bound()
         # Set gains to all identity
-        gain = np.tile(np.identity(2, np.complex64), (n_channels, n_antennas, 1, 1))
-        fn.buffer('gain').set(queue, gain)
-        # We didn't specify the sources, so we need to fudge the total flux
-        fn._flux_sum_host[..., 0] = B[0, 0].real + sefd
-        fn._flux_sum_host[..., 1] = B[1, 1].real + sefd
-        fn._flux_sum.set(queue, fn._flux_sum_host)
+        fn.gain[:] = np.tile(np.identity(2, np.complex64), (n_channels, n_antennas, 1, 1))
 
         ### Predict expected visibilities
         predict = []

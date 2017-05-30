@@ -46,7 +46,7 @@ class Subarray(object):
     ----------
     antennas : list of :class:`katpoint.Antenna`
         The antennas in the simulated array.
-    sources : list of :class:`katpoint.Target`
+    sources : list of :class:`katcbfsim.source.Source`
         The simulated sources. Only point sources are currently supported.
         The do not necessarily have to be radec targets, and the position
         and flux model can safely be changed on the fly.
@@ -97,7 +97,7 @@ class Subarray(object):
 
         Parameters
         ----------
-        source : :class:`katpoint.Target`
+        source : :class:`katcbfsim.source.Source`
             New source
 
         Raises
@@ -109,6 +109,7 @@ class Subarray(object):
             raise CaptureInProgressError('cannot add source while capture is in progress')
         if source.flux_model is None:
             logging.warn('source has no flux model; it will be assumed to be 1 Jy')
+            source.flux_model = katpoint.FluxDensityModel(0.0, np.inf, [])
         self.sources.append(source)
 
     def ensure_source(self, timestamp):
@@ -121,7 +122,7 @@ class Subarray(object):
             Time at which to look up the target
         """
         if not self.sources:
-            self.sources.append(self.target_at(timestamp))
+            self.sources.append(Source(self.target_at(timestamp)))
 
     @property
     def sync_time(self):
@@ -487,13 +488,11 @@ class FXStream(CBFStream):
         predict.ensure_all_bound()
         # Initialise gains. Eventually this will need to be more sophisticated, but
         # for now it is just real and diagonal.
-        gain_host = predict.buffer('gain').empty_like()
-        gain_host.fill(0)
+        predict.gain.fill(0)
         baseline_gain = self.subarray.gain * self.bandwidth / self.n_channels * self.accumulation_length / self.n_accs
         antenna_gain = math.sqrt(baseline_gain)
-        gain_host[:, :, 0, 0].fill(antenna_gain)
-        gain_host[:, :, 1, 1].fill(antenna_gain)
-        predict.buffer('gain').set(predict.command_queue, gain_host)
+        predict.gain[:, :, 0, 0].fill(antenna_gain)
+        predict.gain[:, :, 1, 1].fill(antenna_gain)
         data = [predict.buffer('out')]
         data.append(accel.DeviceArray(self.context, data[0].shape, data[0].dtype, data[0].padded_shape))
         host = [x.empty_like() for x in data]
