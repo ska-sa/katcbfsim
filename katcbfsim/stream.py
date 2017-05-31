@@ -8,7 +8,7 @@ from katsdpsigproc import accel, resource
 import katpoint
 import numpy as np
 import math
-from . import rime
+from . import rime, source
 
 
 logger = logging.getLogger(__name__)
@@ -122,7 +122,7 @@ class Subarray(object):
             Time at which to look up the target
         """
         if not self.sources:
-            self.sources.append(Source(self.target_at(timestamp)))
+            self.sources.append(source.Source(self.target_at(timestamp)))
 
     @property
     def sync_time(self):
