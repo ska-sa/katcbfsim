@@ -15,7 +15,7 @@ setup(
     setup_requires=['katversion'],
     install_requires=[
         'katcp>=0.6.0', 'trollius', 'tornado>=4.2', 'spead2>=1.1.0', 'katpoint', 'numpy', 'h5py',
-        'ipaddress', 'katsdpsigproc[CUDA]', 'katsdptelstate', 'jsonschema'],
+        'ipaddress', 'katsdpsigproc[CUDA]', 'katsdptelstate', 'jsonschema', 'netifaces'],
     tests_require=tests_require,
     extras_require={'test': tests_require, 'doc': ['sphinx>=1.3']},
     packages=find_packages(),
