@@ -52,6 +52,20 @@ def boxm_test(*args):
     return BoxmResult(T, pval)
 
 
+def test_rotate_gains():
+    """Test :func:`katcbfsim.rime._rotate_gains`."""
+    channels = 1024
+    antennas = 32
+    rs = np.random.RandomState(1)
+    G = rs.rand(channels, antennas, 2, 2) + 1j * rs.rand(channels, antennas, 2, 2)
+    G = G.astype(np.complex64)
+    P = rs.rand(antennas, 2, 2).astype(np.float32)
+    expected = np.matmul(G, P[np.newaxis, ...])
+    actual = np.empty((channels, antennas, 2, 2), np.complex64)
+    rime._rotate_gains(G, P, actual)
+    np.testing.assert_allclose(expected, actual, atol=1e-5)
+
+
 class TestRime(object):
     """Tests for :class:`katcbfsim.rime.Rime`."""
 
