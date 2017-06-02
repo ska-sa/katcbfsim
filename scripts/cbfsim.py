@@ -91,7 +91,8 @@ def prepare_server(server, args):
             args.cbf_adc_sample_rate, args.cbf_center_freq, args.cbf_bandwidth,
             args.cbf_channels)
         server.set_accumulation_length(stream, args.cbf_int_time)
-        server.set_destination(stream, args.cbf_spead, args.cbf_substreams, args.max_packet_size)
+        server.set_destination(stream, args.cbf_spead, args.cbf_interface,
+                               args.cbf_substreams, args.max_packet_size)
         if args.dumps:
             server.set_n_dumps(stream, args.dumps)
         if args.start:
@@ -101,7 +102,8 @@ def prepare_server(server, args):
             args.create_beamformer_stream,
             args.cbf_adc_sample_rate, args.cbf_center_freq, args.cbf_bandwidth,
             args.cbf_channels, args.beamformer_timesteps, args.beamformer_bits)
-        server.set_destination(stream, args.cbf_spead, args.cbf_substreams, args.max_packet_size)
+        server.set_destination(stream, args.cbf_spead, args.cbf_interface,
+                               args.cbf_substreams, args.max_packet_size)
         if args.dumps:
             server.set_n_dumps(stream, args.dumps)
         if args.start:
@@ -130,6 +132,7 @@ def main():
     parser.add_argument('--cbf-bandwidth', type=int, default=856000000, metavar='HZ', help='Bandwidth [%(default)s]')
     parser.add_argument('--cbf-center-freq', type=int, default=1284000000, metavar='HZ', help='Sky center frequency [%(default)s]')
     parser.add_argument('--cbf-spead', type=katsdptelstate.endpoint.endpoint_list_parser(7148), metavar='ENDPOINT', default='127.0.0.1:7148', help='destination for CBF output [%(default)s]')
+    parser.add_argument('--cbf-interface', metavar='INTERFACE', help='Network interface on which to send data [auto]')
     parser.add_argument('--cbf-sync-time', type=int, metavar='TIME', help='Sync time as UNIX timestamp [now]')
     parser.add_argument('--cbf-int-time', type=float, metavar='TIME', default=0.5, help='Integration time in seconds [%(default)s]')
     parser.add_argument('--cbf-substreams', type=int, metavar='N', help='Number of substreams (X/B-engines) in simulated CBF [auto]')

@@ -231,7 +231,8 @@ class SimulatorServer(katcp.DeviceServer):
                                    n_channels, timesteps, sample_bits)
         return 'ok',
 
-    def set_destination(self, stream, endpoints, n_substreams=None, max_packet_size=None):
+    def set_destination(self, stream, endpoints, interface=None,
+                        n_substreams=None, max_packet_size=None):
         if n_substreams is None:
             # Formula used by MeerKAT CBF
             n_substreams = 4
@@ -239,7 +240,7 @@ class SimulatorServer(katcp.DeviceServer):
                 n_substreams *= 2
         if isinstance(stream, FXStream):
             stream.transport_factories = [
-                transport.FXSpeadTransport.factory(endpoints, n_substreams, max_packet_size)
+                transport.FXSpeadTransport.factory(endpoints, interface, n_substreams, max_packet_size)
             ]
             if self._telstate is not None:
                 stream.transport_factories.append(
@@ -247,7 +248,7 @@ class SimulatorServer(katcp.DeviceServer):
                         self._telstate, n_substreams))
         elif isinstance(stream, BeamformerStream):
             stream.transport_factories = [
-                transport.BeamformerSpeadTransport.factory(endpoints, n_substreams, max_packet_size)
+                transport.BeamformerSpeadTransport.factory(endpoints, interface, n_substreams, max_packet_size)
             ]
             if self._telstate is not None:
                 stream.transport_factories.append(
@@ -267,7 +268,7 @@ class SimulatorServer(katcp.DeviceServer):
         for e in endpoints:
             if e.port is None:
                 return 'fail', 'no port specified'
-        self.set_destination(stream, endpoints, n_substreams, max_packet_size)
+        self.set_destination(stream, endpoints, None, n_substreams, max_packet_size)
         return 'ok',
 
     @request(Str(), Str())
