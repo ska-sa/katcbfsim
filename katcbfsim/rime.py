@@ -252,13 +252,11 @@ class Rime(accel.Operation):
         # V
         stokes[3, 0, 1] = 1j
         stokes[3, 1, 0] = -1j
-        for channel, freq in enumerate(self.frequencies):
-            x = np.sin(angles) * airy_scale * freq
-            beam = (2 * scipy.special.j1(x) / x)**2
-            fd = self._flux_models[channel, ...] * beam[..., np.newaxis]
-            # Convert from IQUV to coherencies
-            fd = np.einsum('ij,jkl', fd, stokes)
-            self._flux_density_host[channel, ...] = fd
+        x = np.outer(self.frequencies, np.sin(angles) * airy_scale)
+        beam = (2 * scipy.special.j1(x) / x)**2
+        np.einsum('ijk,ij,klm->ijlm',
+                  self._flux_models, beam.astype(np.complex64), stokes,
+                  out=self._flux_density_host)
         logger.debug('Host flux densities updated')
         self._flux_density.set_async(self.command_queue, self._flux_density_host)
 
