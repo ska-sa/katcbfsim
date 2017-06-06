@@ -363,6 +363,8 @@ class FXTelstateTransport(CBFTelstateTransport):
         self.sensor(pre + 'bls_ordering', baselines)
         self.sensor(pre + 'int_time', self.stream.accumulation_length)
         self.sensor(pre + 'n_accs', self.stream.n_accs)
+        self.sensor(pre + 'n_chans_per_substream', self.stream.n_channels // self.n_substreams,
+            immutable=True)
 
     def _send_metadata(self):
         super(FXTelstateTransport, self)._send_metadata()
@@ -375,7 +377,7 @@ class BeamformerTelstateTransport(CBFTelstateTransport):
         pre = self._make_prefix(self.stream_name)
         self.sensor(pre + 'n_chans', self.stream.n_channels, immutable=False)
         self.sensor(pre + 'n_chans_per_substream', self.stream.n_channels // self.n_substreams,
-            immutable=False)
+            immutable=True)
         self.sensor(pre + 'spectra_per_heap', self.stream.timesteps)
         for i in range(2 * self.stream.n_antennas):
             self.sensor('{}input{}_weight'.format(pre, i), 1.0, immutable=False)

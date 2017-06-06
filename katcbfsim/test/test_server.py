@@ -226,6 +226,7 @@ class TestSimulationServer(object):
         # 0.5 rounded to nearest acceptable interval
         self._telstate.add.assert_any_call('cbf_int_time', n_accs * 2 * 4096 / 1712000000.0, immutable=True)
         self._telstate.add.assert_any_call('cbf_n_accs', n_accs, immutable=True)
+        self._telstate.add.assert_any_call('cbf_n_chans_per_substream', 512, immutable=True)
         # Use assert_called_with here rather than assert_any_call, to ensure
         # that it is the *last* call.
         self._telstate.add.assert_called_with('sdp_cam2telstate_status', 'ready', immutable=False)
@@ -264,7 +265,7 @@ class TestSimulationServer(object):
         print(self._telstate.add.mock_calls)
         self._telstate.add.assert_any_call('cbf_{}_n_chans'.format(uname), 4096, immutable=False)
         self._telstate.add.assert_any_call(
-            'cbf_{}_n_chans_per_substream'.format(uname), 1024, immutable=False)
+            'cbf_{}_n_chans_per_substream'.format(uname), 1024, immutable=True)
         self._telstate.add.assert_any_call('cbf_{}_spectra_per_heap'.format(uname), 256, immutable=True)
         for i in range(4):   # input
             self._telstate.add.assert_any_call(
