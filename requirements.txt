@@ -4,6 +4,7 @@ backports.ssl-match-hostname
 certifi
 Cython
 decorator
+enum34
 fakeredis
 funcsigs
 functools32==3.2.3-2
@@ -14,11 +15,13 @@ katversion
 ipaddress==1.0.17
 jsonschema==2.5.1
 linecache2
+llvmlite
 Mako
 MarkupSafe
 mock
 netifaces
 nose
+numba
 numpy
 pbr
 pkginfo

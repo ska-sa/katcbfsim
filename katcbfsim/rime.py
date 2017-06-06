@@ -3,6 +3,7 @@
 from __future__ import print_function, division
 import pkg_resources
 import numpy as np
+import numba
 import katpoint
 import logging
 import scipy.special
@@ -11,6 +12,32 @@ from .source import Source
 
 
 logger = logging.getLogger(__name__)
+
+
+@numba.jit(nopython=True)
+def _rotate_gains(G, P, out):
+    """Multiply a set of gain Jones matrices by parallactic angle rotations.
+
+    Equivalent to (but an order of magnitude faster than)
+
+    .. code:: python
+
+        np.matmul(G, P[np.newaxis, ...], out=out)
+
+    Parameters
+    ----------
+    G : ndarray
+        Gains, shape (channels, antennas, 2, 2)
+    P : ndarray
+        Parallactic angle rotations, shape (antennas, 2, 2)
+    out : ndarray
+        Output array, shape (channels, antennas, 2, 2)
+    """
+    for i in range(G.shape[0]):
+        for j in range(G.shape[1]):
+            for k in range(2):
+                for l in range(2):
+                    out[i, j, k, l] = G[i, j, k, 0] * P[j, 0, l] + G[i, j, k, 1] * P[j, 1, l]
 
 
 class RimeTemplate(object):
@@ -225,13 +252,13 @@ class Rime(accel.Operation):
         # V
         stokes[3, 0, 1] = 1j
         stokes[3, 1, 0] = -1j
-        for channel, freq in enumerate(self.frequencies):
-            x = np.sin(angles) * airy_scale * freq
-            beam = (2 * scipy.special.j1(x) / x)**2
-            fd = self._flux_models[channel, ...] * beam[..., np.newaxis]
-            # Convert from IQUV to coherencies
-            fd = np.einsum('ij,jkl', fd, stokes)
-            self._flux_density_host[channel, ...] = fd
+        x = np.outer(self.frequencies, np.sin(angles) * airy_scale)
+        beam = (2 * scipy.special.j1(x) / x)**2
+        # i is channel, j is source, k is Stokes parameter, lm are
+        # indices of Jones matrices.
+        np.einsum('ijk,ij,klm->ijlm',
+                  self._flux_models, beam.astype(np.complex64), stokes,
+                  out=self._flux_density_host)
         logger.debug('Host flux densities updated')
         self._flux_density.set_async(self.command_queue, self._flux_density_host)
 
@@ -258,15 +285,15 @@ class Rime(accel.Operation):
 
     def _update_die(self):
         """Compute combined direction-independent effects."""
-        P = np.empty((1, len(self.antennas), 2, 2), np.float32)
+        P = np.empty((len(self.antennas), 2, 2), np.float32)
         for i, antenna in enumerate(self.antennas):
             angle = self.phase_center.parallactic_angle(self.time, antenna)
             c = np.cos(angle)
             s = np.sin(angle)
             # MeerKAT uses the opposite handedness for V, H than IEEE x, y, so
             # we have to negate H.
-            P[0, i] = [[c, s], [s, -c]]
-        np.matmul(self.gain, P, out=self._die_host)
+            P[i] = [[c, s], [s, -c]]
+        _rotate_gains(self.gain, P, out=self._die_host)
         self._die.set_async(self.command_queue, self._die_host)
 
     def _run_predict(self):
