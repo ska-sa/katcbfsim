@@ -74,7 +74,10 @@ class Subarray(object):
         self.capturing = 0     # Number of stream that are capturing
 
     def add_antenna(self, antenna):
-        """Add a new antenna to the simulation.
+        """Add a new antenna to the simulation, or replace an existing one.
+
+        If an antenna with the same name exists, it is replaced, otherwise the
+        antenna is appended.
 
         Parameters
         ----------
@@ -88,7 +91,12 @@ class Subarray(object):
         """
         if self.capturing:
             raise CaptureInProgressError('cannot add antennas while capture is in progress')
-        self.antennas.append(antenna)
+        for i in range(len(self.antennas)):
+            if self.antennas[i].name == antenna.name:
+                self.antennas[i] = antenna
+                break
+        else:
+            self.antennas.append(antenna)
 
     def add_source(self, source):
         """Add a new source to the simulation.
