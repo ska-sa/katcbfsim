@@ -272,7 +272,7 @@ class TelstateTransport(object):
 
     def sensor(self, key, value, immutable=True):
         try:
-            self.telstate.add(key, value, immutable)
+            self.telstate.add(key, value, immutable=immutable)
         except katsdptelstate.ImmutableKeyError:
             logger.error('Could not set %s to %r because it already has a different value',
                          key, value)
