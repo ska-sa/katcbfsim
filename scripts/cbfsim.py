@@ -15,6 +15,7 @@ from katcbfsim.stream import Subarray
 from katcbfsim.source import Source
 from katsdpsigproc import accel
 import katsdptelstate
+import katsdpservices
 import katpoint
 
 
@@ -111,17 +112,13 @@ def prepare_server(server, args):
 
 
 def configure_logging(level):
-    formatter = logging.Formatter("%(asctime)s.%(msecs)03dZ - %(filename)s:%(lineno)s - %(levelname)s - %(message)s",
-                                  datefmt="%Y-%m-%d %H:%M:%S")
-    formatter.converter = time.gmtime
-    sh = logging.StreamHandler()
-    sh.setFormatter(formatter)
-    logging.root.addHandler(sh)
-    logging.root.setLevel(level.upper())
+    katsdpservices.setup_logging()
+    if level is not None:
+        logging.root.setLevel(level.upper())
 
 
 def main():
-    parser = katsdptelstate.ArgumentParser()
+    parser = katsdpservices.ArgumentParser()
     group = parser.add_mutually_exclusive_group()
     group.add_argument('--create-fx-stream', type=str, metavar='NAME', help='Create a correlator stream without prompting from katcp')
     group.add_argument('--create-beamformer-stream', type=str, metavar='NAME', help='Create a beamformer stream without prompting from katcp')
@@ -153,6 +150,7 @@ def main():
     if args.start and args.create_fx_stream is None and args.create_beamformer_stream is None:
         parser.error('--start requires --create-fx-stream or --create-beamformer-stream')
     configure_logging(args.log_level)
+    katsdpservices.setup_restart()
 
     try:
         context = accel.create_some_context(interactive=False)
