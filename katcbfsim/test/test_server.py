@@ -179,20 +179,20 @@ class TestSimulationServer(object):
         yield self.make_request('target', 'target, radec, 3:15:00.00, -36:00:00.0')
 
     def _check_common_telstate(self):
-        self._telstate.add.assert_any_call('cbf_adc_sample_rate', 1712000000.0, True)
-        self._telstate.add.assert_any_call('cbf_bandwidth', 856000000.0, True)
-        self._telstate.add.assert_any_call('cbf_n_inputs', 4, True)
-        self._telstate.add.assert_any_call('cbf_scale_factor_timestamp', 1712000000, True)
-        self._telstate.add.assert_any_call('cbf_sync_time', mock.ANY, True)
-        self._telstate.add.assert_any_call('cbf_ticks_between_spectra', 8192, True)
-        self._telstate.add.assert_any_call('cbf_n_chans', 4096, True)
+        self._telstate.add.assert_any_call('cbf_adc_sample_rate', 1712000000.0, immutable=True)
+        self._telstate.add.assert_any_call('cbf_bandwidth', 856000000.0, immutable=True)
+        self._telstate.add.assert_any_call('cbf_n_inputs', 4, immutable=True)
+        self._telstate.add.assert_any_call('cbf_scale_factor_timestamp', 1712000000, immutable=True)
+        self._telstate.add.assert_any_call('cbf_sync_time', mock.ANY, immutable=True)
+        self._telstate.add.assert_any_call('cbf_ticks_between_spectra', 8192, immutable=True)
+        self._telstate.add.assert_any_call('cbf_n_chans', 4096, immutable=True)
         # Baseband frequency
-        self._telstate.add.assert_any_call('cbf_center_freq', 428000000.0, True)
+        self._telstate.add.assert_any_call('cbf_center_freq', 428000000.0, immutable=True)
         for i in range(4):   # inputs
-            self._telstate.add.assert_any_call('cbf_input{}_fft0_shift'.format(i), mock.ANY, False)
-            self._telstate.add.assert_any_call('cbf_input{}_delay'.format(i), (0, 0, 0, 0, 0), False)
-            self._telstate.add.assert_any_call('cbf_input{}_delay_ok'.format(i), True, False)
-            self._telstate.add.assert_any_call('cbf_input{}_eq'.format(i), [200 + 0j], False)
+            self._telstate.add.assert_any_call('cbf_input{}_fft0_shift'.format(i), mock.ANY, immutable=False)
+            self._telstate.add.assert_any_call('cbf_input{}_delay'.format(i), (0, 0, 0, 0, 0), immutable=False)
+            self._telstate.add.assert_any_call('cbf_input{}_delay_ok'.format(i), True, immutable=False)
+            self._telstate.add.assert_any_call('cbf_input{}_eq'.format(i), [200 + 0j], immutable=False)
 
     @tornado.gen.coroutine
     def _test_fx_capture(self, clock_ratio=None, min_dumps=None):
@@ -222,13 +222,13 @@ class TestSimulationServer(object):
                         bls_ordering.append((ap, bp))
         self._check_common_telstate()
         n_accs = 408 * 256   # Gives nearest to 0.5s
-        self._telstate.add.assert_any_call('cbf_bls_ordering', bls_ordering, True)
+        self._telstate.add.assert_any_call('cbf_bls_ordering', bls_ordering, immutable=True)
         # 0.5 rounded to nearest acceptable interval
-        self._telstate.add.assert_any_call('cbf_int_time', n_accs * 2 * 4096 / 1712000000.0, True)
-        self._telstate.add.assert_any_call('cbf_n_accs', n_accs, True)
+        self._telstate.add.assert_any_call('cbf_int_time', n_accs * 2 * 4096 / 1712000000.0, immutable=True)
+        self._telstate.add.assert_any_call('cbf_n_accs', n_accs, immutable=True)
         # Use assert_called_with here rather than assert_any_call, to ensure
         # that it is the *last* call.
-        self._telstate.add.assert_called_with('sdp_cam2telstate_status', 'ready', False)
+        self._telstate.add.assert_called_with('sdp_cam2telstate_status', 'ready', immutable=False)
 
     @cuda_test
     @async_test
@@ -262,16 +262,16 @@ class TestSimulationServer(object):
         assert_true(_current_transport.closed)
         self._check_common_telstate()
         print(self._telstate.add.mock_calls)
-        self._telstate.add.assert_any_call('cbf_{}_n_chans'.format(uname), 4096, False)
+        self._telstate.add.assert_any_call('cbf_{}_n_chans'.format(uname), 4096, immutable=False)
         self._telstate.add.assert_any_call(
-            'cbf_{}_n_chans_per_substream'.format(uname), 1024, False)
-        self._telstate.add.assert_any_call('cbf_{}_spectra_per_heap'.format(uname), 256, True)
+            'cbf_{}_n_chans_per_substream'.format(uname), 1024, immutable=False)
+        self._telstate.add.assert_any_call('cbf_{}_spectra_per_heap'.format(uname), 256, immutable=True)
         for i in range(4):   # input
             self._telstate.add.assert_any_call(
-                'cbf_{}_input{}_weight'.format(uname, i), 1.0, False)
+                'cbf_{}_input{}_weight'.format(uname, i), 1.0, immutable=False)
         # Use assert_called_with here rather than assert_any_call, to ensure
         # that it is the *last* call.
-        self._telstate.add.assert_called_with('sdp_cam2telstate_status', 'ready', False)
+        self._telstate.add.assert_called_with('sdp_cam2telstate_status', 'ready', immutable=False)
 
     @async_test
     @tornado.gen.coroutine
