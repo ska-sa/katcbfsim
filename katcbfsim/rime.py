@@ -254,6 +254,8 @@ class Rime(accel.Operation):
         stokes[3, 1, 0] = -1j
         x = np.outer(self.frequencies, np.sin(angles) * airy_scale)
         beam = (2 * scipy.special.j1(x) / x)**2
+        # i is channel, j is source, k is Stokes parameter, lm are
+        # indices of Jones matrices.
         np.einsum('ijk,ij,klm->ijlm',
                   self._flux_models, beam.astype(np.complex64), stokes,
                   out=self._flux_density_host)
