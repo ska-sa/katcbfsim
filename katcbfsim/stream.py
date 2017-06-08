@@ -651,7 +651,7 @@ class BeamformerStream(CBFStream):
         Number of channels in the stream
     timesteps : int
         Number of samples in time accumulated into a single update. This is
-        used by :class:`BeamformerStreamSpead` to decide the data shape.
+        used by :class:`BeamformerSpeadTransport` to decide the data shape.
     sample_bits : int
         Number of bits per output sample (for each of real and imag). Currently
         this must be 8, 16 or 32.
@@ -662,7 +662,7 @@ class BeamformerStream(CBFStream):
     ----------
     timesteps : int
         Number of samples in time accumulated into a single update. This is
-        used by :class:`BeamformerStreamSpead` to decide the data shape.
+        used by :class:`BeamformerSpeadTransport` to decide the data shape.
     sample_bits : int
         Number of bits per output sample (for each of real and imag). Currently
         this must be 8, 16 or 32.
