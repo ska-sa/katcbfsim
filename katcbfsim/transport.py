@@ -62,7 +62,7 @@ class SpeadTransport(object):
         self._inline_format = [('u', self._flavour.heap_address_bits)]
         # Send at a slightly higher rate, to account for overheads, and so
         # that if the sender sends a burst we can catch up with it.
-        out_rate = in_rate * 1.05 / n
+        out_rate = in_rate * 1.05 / n_substreams
         config = spead2.send.StreamConfig(rate=out_rate, max_packet_size=max_packet_size)
         self._substreams = []
         for i in range(n_substreams):
@@ -126,10 +126,14 @@ class CBFSpeadTransport(SpeadTransport):
 class FXSpeadTransport(CBFSpeadTransport):
     """Data stream from an FX correlator, sent over SPEAD."""
     def __init__(self, endpoints, interface, n_substreams, max_packet_size, stream):
-        in_rate = stream.n_baselines * stream.n_channels * 4 * 8 / \
-            stream.accumulation_length
+        if stream.wall_accumulation_length == 0:
+            in_rate = 0
+        else:
+            in_rate = stream.n_baselines * stream.n_channels * 4 * 8 / \
+                stream.wall_accumulation_length
         super(FXSpeadTransport, self).__init__(
             endpoints, interface, n_substreams, max_packet_size, stream, in_rate)
+        self._last_metadata = 0   # Dump index of last periodic metadata
 
     def make_ig_data(self):
         ig = super(FXSpeadTransport, self).make_ig_data()
@@ -140,7 +144,9 @@ class FXSpeadTransport(CBFSpeadTransport):
 
     @trollius.coroutine
     def send(self, vis, dump_index):
-        yield From(self.send_metadata())
+        if (dump_index - self._last_metadata) * self.stream.accumulation_length >= 5.0:
+            self._last_metadata = dump_index
+            yield From(self.send_metadata())
         assert vis.flags.c_contiguous, 'Visibility array must be contiguous'
         shape = (self.stream.n_channels, self.stream.n_baselines * 4, 2)
         substream_channels = self.stream.n_channels // self.n_substreams
@@ -218,6 +224,7 @@ class BeamformerSpeadTransport(CBFSpeadTransport):
             in_rate = stream.n_channels * stream.timesteps * 2 * stream.sample_bits / stream.wall_interval / 8
         super(BeamformerSpeadTransport, self).__init__(
             endpoints, interface, n_substreams, max_packet_size, stream, in_rate)
+        self._last_metadata = 0     # Dump index of last periodic metadata
 
     def make_ig_data(self):
         ig = super(BeamformerSpeadTransport, self).make_ig_data()
@@ -227,7 +234,9 @@ class BeamformerSpeadTransport(CBFSpeadTransport):
 
     @trollius.coroutine
     def send(self, beam_data, index):
-        yield From(self.send_metadata())
+        if (index - self._last_metadata) * self.stream.interval >= 5.0:
+            self._last_metadata = index
+            yield From(self.send_metadata())
         substream_channels = self.stream.n_channels // self.n_substreams
         timestamp = index * self.stream.timesteps * self.stream.n_channels * \
                 self.stream.scale_factor_timestamp // self.stream.bandwidth
