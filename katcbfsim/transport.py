@@ -22,6 +22,18 @@ def _get_interface_address(interface):
     return netifaces.ifaddresses(interface)[netifaces.AF_INET][0]['addr']
 
 
+def num_substreams(stream):
+    """Determine the number of substreams to use for a stream.
+
+    This is based on the MeerKAT CBF instruments, which support power-of-two
+    numbers of antennas (minimum 4), with 4 substreams per antenna.
+    """
+    n_substreams = 16
+    while n_substreams < stream.n_antennas * 4:
+        n_substreams *= 2
+    return n_substreams
+
+
 class EndpointFactory(object):
     def __init__(self, cls, endpoints, interface, n_substreams, max_packet_size):
         self.cls = cls
@@ -51,6 +63,8 @@ class SpeadTransport(object):
         if not endpoints:
             raise ValueError('At least one endpoint is required')
         n = len(endpoints)
+        if n_substreams is None:
+            n_substreams = num_substreams(stream)
         if stream.n_channels % n_substreams:
             raise ValueError('Number of channels not divisible by number of substreams')
         if n_substreams % n:
@@ -275,6 +289,8 @@ class TelstateTransport(object):
     def __init__(self, telstate, n_substreams, stream):
         if not telstate:
             raise ValueError('A telstate connection is required')
+        if n_substreams is None:
+            n_substreams = num_substreams(stream)
         self.telstate = telstate
         self.stream = stream
         self.n_substreams = n_substreams

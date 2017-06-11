@@ -233,11 +233,6 @@ class SimulatorServer(katcp.DeviceServer):
 
     def set_destination(self, stream, endpoints, interface=None,
                         n_substreams=None, max_packet_size=None):
-        if n_substreams is None:
-            # Formula used by MeerKAT CBF
-            n_substreams = 4
-            while n_substreams < max(len(endpoints), stream.n_antennas * 4):
-                n_substreams *= 2
         if isinstance(stream, FXStream):
             stream.transport_factories = [
                 transport.FXSpeadTransport.factory(endpoints, interface, n_substreams, max_packet_size)
