@@ -53,13 +53,15 @@ _current_transport = None
 class MockTransport(object):
     """Transport that throws away its data, for testing purposes."""
     @classmethod
-    def factory(cls, endpoints, interface, n_substreams, max_packet_size):
-        return transport.EndpointFactory(cls, endpoints, interface, n_substreams, max_packet_size)
+    def factory(cls, endpoints, interface, ibv, n_substreams, max_packet_size):
+        return transport.EndpointFactory(cls, endpoints, interface, ibv,
+                                         n_substreams, max_packet_size)
 
-    def __init__(self, endpoints, interface, n_substreams, max_packet_size, stream):
+    def __init__(self, endpoints, interface, ibv, n_substreams, max_packet_size, stream):
         global _current_transport
         self.endpoints = endpoints
         self.interface = interface
+        self.ibv = ibv
         self.stream = stream
         self.dumps = 0
         self.dumps_semaphore = tornado.locks.Semaphore(0)
