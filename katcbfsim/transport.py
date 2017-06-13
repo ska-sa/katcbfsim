@@ -10,16 +10,13 @@ import spead2
 import spead2.send
 import spead2.send.trollius
 import katsdptelstate
+import katsdpservices
 import concurrent.futures
 import h5py
 from collections import deque
 
 
 logger = logging.getLogger(__name__)
-
-
-def _get_interface_address(interface):
-    return netifaces.ifaddresses(interface)[netifaces.AF_INET][0]['addr']
 
 
 def num_substreams(stream):
@@ -35,31 +32,32 @@ def num_substreams(stream):
 
 
 class EndpointFactory(object):
-    def __init__(self, cls, endpoints, interface, n_substreams, max_packet_size):
+    def __init__(self, cls, endpoints, ifaddr, ibv, n_substreams, max_packet_size):
         self.cls = cls
         self.endpoints = endpoints
-        self.interface = interface
+        self.ifaddr = ifaddr
+        self.ibv = ibv
         self.n_substreams = n_substreams
         if max_packet_size is None:
             max_packet_size = 4096
         self.max_packet_size = max_packet_size
 
     def __call__(self, stream):
-        return self.cls(self.endpoints, self.interface,
+        return self.cls(self.endpoints, self.ifaddr, self.ibv,
                         self.n_substreams, self.max_packet_size, stream)
 
 
 class SpeadTransport(object):
     """Base class for SPEAD streams, providing a factory function."""
     @classmethod
-    def factory(cls, endpoints, interface, n_substreams, max_packet_size):
-        return EndpointFactory(cls, endpoints, interface, n_substreams, max_packet_size)
+    def factory(cls, endpoints, ifaddr, ibv, n_substreams, max_packet_size):
+        return EndpointFactory(cls, endpoints, ifaddr, ibv, n_substreams, max_packet_size)
 
     @property
     def n_endpoints(self):
         return len(self.endpoints)
 
-    def __init__(self, endpoints, interface, n_substreams, max_packet_size, stream, in_rate):
+    def __init__(self, endpoints, ifaddr, ibv, n_substreams, max_packet_size, stream, in_rate):
         if not endpoints:
             raise ValueError('At least one endpoint is required')
         n = len(endpoints)
@@ -82,10 +80,14 @@ class SpeadTransport(object):
         for i in range(n_substreams):
             e = endpoints[i * len(endpoints) // n_substreams]
             kwargs = {}
-            if interface is not None:
-                kwargs['interface_address'] = _get_interface_address(interface)
+            if ifaddr is not None:
+                kwargs['interface_address'] = ifaddr
                 kwargs['ttl'] = 1
-            self._substreams.append(spead2.send.trollius.UdpStream(
+            if ibv:
+                stream_cls = spead2.send.trollius.UdpIbvStream
+            else:
+                stream_cls = spead2.send.trollius.UdpStream
+            self._substreams.append(stream_cls(
                 spead2.ThreadPool(), e.host, e.port, config, **kwargs))
             self._substreams[-1].set_cnt_sequence(i, n_substreams)
 
@@ -139,14 +141,14 @@ class CBFSpeadTransport(SpeadTransport):
 
 class FXSpeadTransport(CBFSpeadTransport):
     """Data stream from an FX correlator, sent over SPEAD."""
-    def __init__(self, endpoints, interface, n_substreams, max_packet_size, stream):
+    def __init__(self, endpoints, ifaddr, ibv, n_substreams, max_packet_size, stream):
         if stream.wall_accumulation_length == 0:
             in_rate = 0
         else:
             in_rate = stream.n_baselines * stream.n_channels * 4 * 8 / \
                 stream.wall_accumulation_length
         super(FXSpeadTransport, self).__init__(
-            endpoints, interface, n_substreams, max_packet_size, stream, in_rate)
+            endpoints, ifaddr, ibv, n_substreams, max_packet_size, stream, in_rate)
         self._last_metadata = 0   # Dump index of last periodic metadata
 
     def make_ig_data(self):
@@ -231,13 +233,13 @@ class FXFileTransport(FileTransport):
 
 class BeamformerSpeadTransport(CBFSpeadTransport):
     """Data stream from a beamformer, sent over SPEAD."""
-    def __init__(self, endpoints, interface, n_substreams, max_packet_size, stream):
+    def __init__(self, endpoints, ifaddr, ibv, n_substreams, max_packet_size, stream):
         if stream.wall_interval == 0:
             in_rate = 0
         else:
             in_rate = stream.n_channels * stream.timesteps * 2 * stream.sample_bits / stream.wall_interval / 8
         super(BeamformerSpeadTransport, self).__init__(
-            endpoints, interface, n_substreams, max_packet_size, stream, in_rate)
+            endpoints, ifaddr, ibv, n_substreams, max_packet_size, stream, in_rate)
         self._last_metadata = 0     # Dump index of last periodic metadata
 
     def make_ig_data(self):

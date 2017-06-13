@@ -53,13 +53,15 @@ _current_transport = None
 class MockTransport(object):
     """Transport that throws away its data, for testing purposes."""
     @classmethod
-    def factory(cls, endpoints, interface, n_substreams, max_packet_size):
-        return transport.EndpointFactory(cls, endpoints, interface, n_substreams, max_packet_size)
+    def factory(cls, endpoints, interface, ibv, n_substreams, max_packet_size):
+        return transport.EndpointFactory(cls, endpoints, interface, ibv,
+                                         n_substreams, max_packet_size)
 
-    def __init__(self, endpoints, interface, n_substreams, max_packet_size, stream):
+    def __init__(self, endpoints, interface, ibv, n_substreams, max_packet_size, stream):
         global _current_transport
         self.endpoints = endpoints
         self.interface = interface
+        self.ibv = ibv
         self.stream = stream
         self.dumps = 0
         self.dumps_semaphore = tornado.locks.Semaphore(0)
@@ -253,7 +255,7 @@ class TestSimulationServer(object):
         name = 'i0.tied-array-channelised-voltage.0x'
         uname = 'i0_tied_array_channelised_voltage_0x'
         yield self.make_request('stream-create-beamformer', name, 1712000000, 1284000000, 856000000, 4096, 256, 8)
-        yield self.make_request('capture-destination', name, 'localhost:7149', 4)
+        yield self.make_request('capture-destination', name, 'localhost:7149', 'lo', False, 4)
         yield self.make_request('capture-start', name)
         for i in range(min_dumps):
             yield _current_transport.dumps_semaphore.acquire()

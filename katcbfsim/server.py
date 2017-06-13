@@ -8,8 +8,9 @@ import logging
 import functools
 import ipaddress
 from katcp import Sensor
-from katcp.kattypes import Str, Float, Int, Address, request, return_reply
+from katcp.kattypes import Str, Float, Int, Address, Bool, request, return_reply
 from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
+import katsdpservices
 import katcbfsim
 from . import transport
 from .stream import (Subarray, FXStream, BeamformerStream,
@@ -231,11 +232,12 @@ class SimulatorServer(katcp.DeviceServer):
                                    n_channels, timesteps, sample_bits)
         return 'ok',
 
-    def set_destination(self, stream, endpoints, interface=None,
+    def set_destination(self, stream, endpoints, ifaddr=None, ibv=False,
                         n_substreams=None, max_packet_size=None):
         if isinstance(stream, FXStream):
             stream.transport_factories = [
-                transport.FXSpeadTransport.factory(endpoints, interface, n_substreams, max_packet_size)
+                transport.FXSpeadTransport.factory(
+                    endpoints, ifaddr, ibv, n_substreams, max_packet_size)
             ]
             if self._telstate is not None:
                 stream.transport_factories.append(
@@ -243,7 +245,8 @@ class SimulatorServer(katcp.DeviceServer):
                         self._telstate, n_substreams))
         elif isinstance(stream, BeamformerStream):
             stream.transport_factories = [
-                transport.BeamformerSpeadTransport.factory(endpoints, interface, n_substreams, max_packet_size)
+                transport.BeamformerSpeadTransport.factory(
+                    endpoints, ifaddr, ibv, n_substreams, max_packet_size)
             ]
             if self._telstate is not None:
                 stream.transport_factories.append(
@@ -252,18 +255,24 @@ class SimulatorServer(katcp.DeviceServer):
         else:
             raise UnsupportedStreamError('unknown stream type')
 
-    @request(Str(), Str(), Int(optional=True), Int(optional=True))
+    @request(Str(), Str(), Str(optional=True), Bool(optional=True),
+             Int(optional=True), Int(optional=True))
     @return_reply()
     @_stream_exceptions
     @_stream_request
-    def request_capture_destination(self, sock, stream, destination, n_substreams=None,
+    def request_capture_destination(self, sock, stream, destination,
+                                    interface=None, ibv=False, n_substreams=None,
                                     max_packet_size=None):
         """Set the destination endpoints for a stream"""
         endpoints = endpoint_list_parser(None)(destination)
         for e in endpoints:
             if e.port is None:
                 return 'fail', 'no port specified'
-        self.set_destination(stream, endpoints, None, n_substreams, max_packet_size)
+        try:
+            ifaddr = katsdpservices.get_interface_address(interface)
+        except ValueError as error:
+            return 'fail', str(error)
+        self.set_destination(stream, endpoints, ifaddr, ibv, n_substreams, max_packet_size)
         return 'ok',
 
     @request(Str(), Str())

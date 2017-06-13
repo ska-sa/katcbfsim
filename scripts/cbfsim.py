@@ -86,13 +86,14 @@ def prepare_server(server, args):
     server.set_gain(args.cbf_sim_gain)
     if args.cbf_target is not None:
         server.set_target(katpoint.Target(args.cbf_target))
+    ifaddr = katsdpservices.get_interface_address(args.cbf_interface)
     if args.create_fx_stream is not None:
         stream = server.add_fx_stream(
             args.create_fx_stream,
             args.cbf_adc_sample_rate, args.cbf_center_freq, args.cbf_bandwidth,
             args.cbf_channels)
         server.set_accumulation_length(stream, args.cbf_int_time)
-        server.set_destination(stream, args.cbf_spead, args.cbf_interface,
+        server.set_destination(stream, args.cbf_spead, ifaddr, args.cbf_ibv,
                                args.cbf_substreams, args.max_packet_size)
         if args.dumps:
             server.set_n_dumps(stream, args.dumps)
@@ -103,7 +104,7 @@ def prepare_server(server, args):
             args.create_beamformer_stream,
             args.cbf_adc_sample_rate, args.cbf_center_freq, args.cbf_bandwidth,
             args.cbf_channels, args.beamformer_timesteps, args.beamformer_bits)
-        server.set_destination(stream, args.cbf_spead, args.cbf_interface,
+        server.set_destination(stream, args.cbf_spead, ifaddr, args.cbf_ibv,
                                args.cbf_substreams, args.max_packet_size)
         if args.dumps:
             server.set_n_dumps(stream, args.dumps)
@@ -130,6 +131,7 @@ def main():
     parser.add_argument('--cbf-center-freq', type=int, default=1284000000, metavar='HZ', help='Sky center frequency [%(default)s]')
     parser.add_argument('--cbf-spead', type=katsdptelstate.endpoint.endpoint_list_parser(7148), metavar='ENDPOINT', default='127.0.0.1:7148', help='destination for CBF output [%(default)s]')
     parser.add_argument('--cbf-interface', metavar='INTERFACE', help='Network interface on which to send data [auto]')
+    parser.add_argument('--cbf-ibv', action='store_true', help='Use ibverbs for acceleration (requires --cbf-interface)')
     parser.add_argument('--cbf-sync-time', type=int, metavar='TIME', help='Sync time as UNIX timestamp [now]')
     parser.add_argument('--cbf-int-time', type=float, metavar='TIME', default=0.5, help='Integration time in seconds [%(default)s]')
     parser.add_argument('--cbf-substreams', type=int, metavar='N', help='Number of substreams (X/B-engines) in simulated CBF [auto]')
@@ -149,6 +151,8 @@ def main():
     args = parser.parse_args()
     if args.start and args.create_fx_stream is None and args.create_beamformer_stream is None:
         parser.error('--start requires --create-fx-stream or --create-beamformer-stream')
+    if args.cbf_ibv and args.cbf_interface is None:
+        parser.error('--cbf-ibv requires --cbf-interface')
     configure_logging(args.log_level)
     katsdpservices.setup_restart()
 
