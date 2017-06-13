@@ -255,7 +255,7 @@ class TestSimulationServer(object):
         name = 'i0.tied-array-channelised-voltage.0x'
         uname = 'i0_tied_array_channelised_voltage_0x'
         yield self.make_request('stream-create-beamformer', name, 1712000000, 1284000000, 856000000, 4096, 256, 8)
-        yield self.make_request('capture-destination', name, 'localhost:7149', 4)
+        yield self.make_request('capture-destination', name, 'localhost:7149', 'lo', False, 4)
         yield self.make_request('capture-start', name)
         for i in range(min_dumps):
             yield _current_transport.dumps_semaphore.acquire()
