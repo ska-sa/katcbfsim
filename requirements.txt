@@ -34,6 +34,7 @@ pyephem
 pytest
 python-dateutil
 pytools
+pytz
 redis
 scipy
 singledispatch
