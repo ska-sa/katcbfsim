@@ -23,6 +23,7 @@ netifaces
 nose
 numba
 numpy
+pandas
 pbr
 pkginfo
 ply
@@ -31,6 +32,7 @@ py
 pycuda
 pyephem
 pytest
+python-dateutil
 pytools
 redis
 scipy
