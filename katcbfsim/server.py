@@ -1,19 +1,19 @@
 from __future__ import print_function, division
-import trollius
-from trollius import From
-import katcp
-import katpoint
-import tornado
 import logging
 import functools
 import ipaddress
+import trollius
+import katcp
+import katpoint
+import tornado
 from katcp import Sensor
-from katcp.kattypes import Str, Float, Int, Address, Bool, request, return_reply
+from katcp.kattypes import Str, Float, Int, Bool, request, return_reply
 from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
 import katsdpservices
 import katcbfsim
 from . import transport
-from .stream import (Subarray, FXStream, BeamformerStream, StreamError, UnsupportedStreamError)
+from .stream import (Subarray, FXStream, BeamformerStream,
+                     StreamError, UnsupportedStreamError, ConfigError)
 from .source import Source
 
 logger = logging.getLogger(__name__)
@@ -27,6 +27,7 @@ def to_tornado_future(trollius_future, loop=None):
     """
     f = trollius.ensure_future(trollius_future, loop=loop)
     tf = tornado.concurrent.Future()
+
     def copy(future):
         assert future is f
         if f.cancelled():
@@ -57,6 +58,7 @@ def _stream_request(wrapped):
             return 'fail', 'requested stream name "{}" not found'.format(name)
         return wrapped(self, sock, stream, *args, **kwargs)
     return wrapper
+
 
 def _stream_exceptions(wrapped):
     """Decorator used on requests that and turns exceptions defined in
@@ -157,7 +159,8 @@ class SimulatorServer(katcp.DeviceServer):
         self._halting = False
 
     def setup_sensors(self):
-        self.add_sensor(Sensor.discrete('device-status',
+        self.add_sensor(Sensor.discrete(
+            'device-status',
             'Dummy device status sensor. The simulator is always ok.',
             '', ['ok', 'degraded', 'fail'], initial_status=Sensor.NOMINAL))
 
@@ -171,13 +174,16 @@ class SimulatorServer(katcp.DeviceServer):
             stream.set_telstate(self._telstate)
         self._streams[stream.name] = stream
         self._stream_sensors[stream] = {
-            'bandwidth': Sensor.integer('{}.bandwidth'.format(stream.name),
+            'bandwidth': Sensor.integer(
+                '{}.bandwidth'.format(stream.name),
                 'The bandwidth currently configured for the data stream',
                 'Hz', default=stream.bandwidth, initial_status=Sensor.NOMINAL),
-            'channels': Sensor.integer('{}.channels'.format(stream.name),
+            'channels': Sensor.integer(
+                '{}.channels'.format(stream.name),
                 'The number of channels of the channelised data stream',
                 '', default=stream.n_channels, initial_status=Sensor.NOMINAL),
-            'centerfrequency': Sensor.integer('{}.centerfrequency'.format(stream.name),
+            'centerfrequency': Sensor.integer(
+                '{}.centerfrequency'.format(stream.name),
                 'The center frequency for the data stream', 'Hz')
         }
         for sensor in self._stream_sensors[stream].itervalues():
