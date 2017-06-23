@@ -166,6 +166,12 @@ class SimulatorServer(katcp.DeviceServer):
 
     def _add_stream(self, stream):
         assert stream.name not in self._streams
+        if self._telstate is not None:
+            # TODO: this could block asyncio for a non-trivial amount of time,
+            # but it can't be made asynchronous without creating race
+            # conditions (where another stream could be added in parallel with
+            # the same name). A lock may be required.
+            stream.set_telstate(self._telstate)
         self._streams[stream.name] = stream
         self._stream_sensors[stream] = {
             'bandwidth': Sensor.integer('{}.bandwidth'.format(stream.name),
@@ -190,10 +196,10 @@ class SimulatorServer(katcp.DeviceServer):
         self._add_stream(stream)
         return stream
 
-    @request(Str(), Int(), Int(), Int(), Int())
+    @request(Str(), Int(), Int(), Int(), Int(), Int(optional=True))
     @return_reply()
     def request_stream_create_correlator(
-            self, sock, name, adc_rate, center_frequency, bandwidth, n_channels):
+            self, sock, name, adc_rate, center_frequency, bandwidth, n_channels, n_substreams=None):
         """Create a new simulated correlator stream
 
         Parameters
@@ -208,6 +214,8 @@ class SimulatorServer(katcp.DeviceServer):
             Bandwidth of all channels in the stream, in Hz
         n_channels : int
             Number of channels in the stream
+        n_substreams : int, optional
+            Number of substreams (X engines)
         """
         if name in self._streams:
             return 'fail', 'stream {} already exists'.format(name)
@@ -215,53 +223,44 @@ class SimulatorServer(katcp.DeviceServer):
             return 'fail', 'cannot add a stream while halting'
         if self._context is None:
             return 'fail', 'no device context available'
-        self.add_fx_stream(name, adc_rate, center_frequency, bandwidth, n_channels)
+        self.add_fx_stream(name, adc_rate, center_frequency, bandwidth, n_channels, n_substreams)
         return 'ok',
 
-    @request(Str(), Int(), Int(), Int(), Int(), Int(), Int())
+    @request(Str(), Int(), Int(), Int(), Int(), Int(), Int(), Int())
     @return_reply()
     def request_stream_create_beamformer(
             self, sock, name, adc_rate, center_frequency, bandwidth, n_channels,
-            timesteps, sample_bits):
+            n_substreams, timesteps, sample_bits):
         """Create a new simulated beamformer stream"""
         if name in self._streams:
             return 'fail', 'stream {} already exists'.format(name)
         if self._halting:
             return 'fail', 'cannot add a stream while halting'
         self.add_beamformer_stream(name, adc_rate, center_frequency, bandwidth,
-                                   n_channels, timesteps, sample_bits)
+                                   n_channels, n_substreams, timesteps, sample_bits)
         return 'ok',
 
     def set_destination(self, stream, endpoints, ifaddr=None, ibv=False,
-                        n_substreams=None, max_packet_size=None):
+                        max_packet_size=None):
         if isinstance(stream, FXStream):
             stream.transport_factories = [
                 transport.FXSpeadTransport.factory(
-                    endpoints, ifaddr, ibv, n_substreams, max_packet_size)
+                    endpoints, ifaddr, ibv, max_packet_size)
             ]
-            if self._telstate is not None:
-                stream.transport_factories.append(
-                    transport.FXTelstateTransport.factory(
-                        self._telstate, n_substreams))
         elif isinstance(stream, BeamformerStream):
             stream.transport_factories = [
                 transport.BeamformerSpeadTransport.factory(
-                    endpoints, ifaddr, ibv, n_substreams, max_packet_size)
+                    endpoints, ifaddr, ibv, max_packet_size)
             ]
-            if self._telstate is not None:
-                stream.transport_factories.append(
-                    transport.BeamformerTelstateTransport.factory(
-                        self._telstate, n_substreams, stream_name=stream.name))
         else:
             raise UnsupportedStreamError('unknown stream type')
 
-    @request(Str(), Str(), Str(optional=True), Bool(optional=True),
-             Int(optional=True), Int(optional=True))
+    @request(Str(), Str(), Str(optional=True), Bool(optional=True), Int(optional=True))
     @return_reply()
     @_stream_exceptions
     @_stream_request
     def request_capture_destination(self, sock, stream, destination,
-                                    interface=None, ibv=False, n_substreams=None,
+                                    interface=None, ibv=False,
                                     max_packet_size=None):
         """Set the destination endpoints for a stream"""
         endpoints = endpoint_list_parser(None)(destination)
@@ -272,7 +271,7 @@ class SimulatorServer(katcp.DeviceServer):
             ifaddr = katsdpservices.get_interface_address(interface)
         except ValueError as error:
             return 'fail', str(error)
-        self.set_destination(stream, endpoints, ifaddr, ibv, n_substreams, max_packet_size)
+        self.set_destination(stream, endpoints, ifaddr, ibv, max_packet_size)
         return 'ok',
 
     @request(Str(), Str())

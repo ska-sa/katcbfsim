@@ -354,6 +354,9 @@ class CBFStream(Stream):
         Bandwidth of all channels in the stream, in Hz
     n_channels : int
         Number of channels in the stream
+    n_substreams : int, optional
+        Number of substreams (X/B-engines). If not specified, a default
+        will be computed to match the MeerKAT CBF.
     loop : :class:`trollius.BaseEventLoop`, optional
         Event loop for coroutines
 
@@ -367,21 +370,85 @@ class CBFStream(Stream):
         Bandwidth of all channels in the stream, in Hz
     n_channels : int
         Number of channels in the stream
+    n_substreams : int
+        Number of substreams (X/B-engines)
     n_dumps : int
         If not ``None``, limits the number of dumps that will be done
     scale_factor_timestamp : int
         Number of timestamp increments per second
     """
     def __init__(self, subarray, name, adc_rate, center_frequency, bandwidth,
-                 n_channels, loop=None):
+                 n_channels, n_substreams=None, loop=None):
         super(CBFStream, self).__init__(subarray, name, loop)
         self.adc_rate = adc_rate
         self.center_frequency = center_frequency
         self.bandwidth = bandwidth
         self.n_channels = n_channels
+        if not n_substreams:
+            # This is based on the MeerKAT CBF instruments, which support
+            # power-of-two numbers of antennas (minimum 4), with 4 substreams
+            # per antenna.
+            n_substreams = 16
+            while n_substreams < self.n_antennas * 4:
+                n_substreams *= 2
+        if n_channels % n_substreams:
+            raise ValueError('Number of channels not divisible by number of substreams')
+        self.n_substreams = n_substreams
         self.n_dumps = None
         # This is what real CBF uses, even though it wraps pretty quickly
         self.scale_factor_timestamp = adc_rate
+
+    def sensor(self, telstate, key, value, immutable=True):
+        try:
+            telstate.add(key, value, immutable=immutable)
+        except katsdptelstate.ImmutableKeyError:
+            logger.error('Could not set %s to %r because it already has a different value',
+                         key, value)
+
+    @classmethod
+    def _make_prefix(cls, scope):
+        """Creates a prefix for a sensor name. If `scope` is ``None``, returns
+        :samp:`cbf_`, otherwise :samp:`cbf_{scope}_` where the scope is
+        underscore-normalised.
+        """
+        if scope is None:
+            return 'cbf_'
+        else:
+            scope = scope.replace('.', '_').replace('-', '_')
+            return 'cbf_{}_'.format(scope)
+
+    def _instrument_sensors(self, telstate):
+        pre = self._make_prefix(None)   # instrument names not used yet
+        # Only the sensors captured by cam2telstate are simulated
+        self.sensor(telstate, pre + 'adc_sample_rate', float(self.adc_rate))
+        self.sensor(telstate, pre + 'bandwidth', float(self.bandwidth))
+        self.sensor(telstate, pre + 'scale_factor_timestamp', float(self.scale_factor_timestamp))
+        self.sensor(telstate, pre + 'sync_time', self.subarray.sync_time.secs)
+        self.sensor(telstate, pre + 'n_inputs', 2 * self.n_antennas)
+
+    def _antenna_channelised_voltage_sensors(self, telstate):
+        pre = self._make_prefix(None)      # stream name not used yet
+        for i in range(2 * self.n_antennas):
+            input_pre = pre + 'input{}_'.format(i)
+            # These are all arbitrary dummy values
+            self.sensor(telstate, input_pre + 'delay', (0, 0, 0, 0, 0), immutable=False)
+            self.sensor(telstate, input_pre + 'delay_ok', True, immutable=False)
+            self.sensor(telstate, input_pre + 'eq', [200 + 0j], immutable=False)
+            self.sensor(telstate, input_pre + 'fft0_shift', 32767, immutable=False)
+        # Need to report the baseband center frequency
+        center_frequency = self.center_frequency % self.bandwidth
+        self.sensor(telstate, pre + 'center_freq', float(center_frequency))
+        self.sensor(telstate, pre + 'n_chans', self.n_channels)
+        self.sensor(telstate, pre + 'ticks_between_spectra',
+                    self.n_channels * self.scale_factor_timestamp // self.bandwidth)
+
+    def set_telstate(self, telstate):
+        """Populate telstate with simulated sensors for the stream.
+
+        Subclasses overload this to set stream-specific sensors.
+        """
+        self._instrument_sensors(telstate)
+        self._antenna_channelised_voltage_sensors(telstate)
 
 
 class FXStream(CBFStream):
@@ -389,6 +456,8 @@ class FXStream(CBFStream):
 
     Parameters
     ----------
+    telstate : :class:`katsdptelstate.TelescopeState`
+        Telescope state to populate with simulated sensors
     context : katsdpsigproc context
         Device context
     subarray : :class:`Subarray`
@@ -403,6 +472,8 @@ class FXStream(CBFStream):
         Bandwidth of all channels in the stream, in Hz
     n_channels : int
         Number of channels in the stream
+    n_substreams : int
+        Number of substreams (X-engines)
     loop : :class:`trollius.BaseEventLoop`, optional
         Event loop for coroutines
 
@@ -421,9 +492,9 @@ class FXStream(CBFStream):
         indirectly by writing to :attr:`accumulation_length`.
     """
     def __init__(self, context, subarray, name, adc_rate,
-                 center_frequency, bandwidth, n_channels, loop=None):
-        super(FXStream, self).__init__(subarray, name, adc_rate, center_frequency, bandwidth,
-                                        n_channels, loop)
+                 center_frequency, bandwidth, n_channels, n_substreams, loop=None):
+        super(FXStream, self).__init__(subarray, name, adc_rate, center_frequency,
+                                       bandwidth, n_channels, n_substreams, loop)
         self.context = context
         self.accumulation_length = 0.5
         self.sefd = 400.0   # Jansky
@@ -630,6 +701,25 @@ class FXStream(CBFStream):
             if transport is not None:
                 yield From(transport.close())
 
+    def _baseline_correlation_products_sensors(self, telstate):
+        pre = self._make_prefix(None)   # Name not currently used in sensors for this stream
+        baselines = []
+        for i in range(self.n_antennas):
+            for j in range(i, self.n_antennas):
+                for pol1 in ('v', 'h'):
+                    for pol2 in ('v', 'h'):
+                        name1 = self.subarray.antennas[i].name + pol1
+                        name2 = self.subarray.antennas[j].name + pol2
+                        baselines.append((name1, name2))
+        self.sensor(telstate, pre + 'bls_ordering', baselines)
+        self.sensor(telstate, pre + 'int_time', self.accumulation_length)
+        self.sensor(telstate, pre + 'n_accs', self.n_accs)
+        self.sensor(telstate, pre + 'n_chans_per_substream', self.n_channels // self.n_substreams)
+
+    def set_telstate(self, telstate):
+        super(FXStream, self).set_telstate(telstate)
+        self._baseline_correlation_products_sensors(telstate)
+
 
 class BeamformerStream(CBFStream):
     """Simulated beam-former. The individual antennas are not simulated, but
@@ -649,6 +739,8 @@ class BeamformerStream(CBFStream):
         Bandwidth of all channels in the stream, in Hz
     n_channels : int
         Number of channels in the stream
+    n_substreams : int
+        Number of substreams (B-engines)
     timesteps : int
         Number of samples in time accumulated into a single update. This is
         used by :class:`BeamformerSpeadTransport` to decide the data shape.
@@ -674,9 +766,10 @@ class BeamformerStream(CBFStream):
         Equivalent to :attr:`interval`, but in wall-clock time
     """
     def __init__(self, subarray, name, adc_rate, center_frequency, bandwidth,
-                 n_channels, timesteps, sample_bits, loop=None):
+                 n_channels, n_substreams, timesteps, sample_bits, loop=None):
         super(BeamformerStream, self).__init__(
-                subarray, name, adc_rate, center_frequency, bandwidth, n_channels, loop)
+                subarray, name, adc_rate, center_frequency, bandwidth,
+                n_channels, n_substreams, loop)
         self.timesteps = timesteps
         self.sample_bits = sample_bits
         if sample_bits == 8:
@@ -748,3 +841,15 @@ class BeamformerStream(CBFStream):
             if transports is not None:
                 for transport in transports:
                     yield From(transport.close())
+
+    def _tied_array_channelised_voltage_sensors(self, telstate):
+        pre = self._make_prefix(self.name)
+        self.sensor(telstate, pre + 'n_chans', self.n_channels, immutable=False)
+        self.sensor(telstate, pre + 'n_chans_per_substream', self.n_channels // self.n_substreams)
+        self.sensor(telstate, pre + 'spectra_per_heap', self.timesteps)
+        for i in range(2 * self.n_antennas):
+            self.sensor(telstate, '{}input{}_weight'.format(pre, i), 1.0, immutable=False)
+
+    def set_telstate(self, telstate):
+        super(BeamformerStream, self).set_telstate(telstate)
+        self._tied_array_channelised_voltage_sensors(telstate)

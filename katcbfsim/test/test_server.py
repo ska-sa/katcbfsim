@@ -53,11 +53,11 @@ _current_transport = None
 class MockTransport(object):
     """Transport that throws away its data, for testing purposes."""
     @classmethod
-    def factory(cls, endpoints, interface, ibv, n_substreams, max_packet_size):
+    def factory(cls, endpoints, interface, ibv, max_packet_size):
         return transport.EndpointFactory(cls, endpoints, interface, ibv,
-                                         n_substreams, max_packet_size)
+                                         max_packet_size)
 
-    def __init__(self, endpoints, interface, ibv, n_substreams, max_packet_size, stream):
+    def __init__(self, endpoints, interface, ibv, max_packet_size, stream):
         global _current_transport
         self.endpoints = endpoints
         self.interface = interface
@@ -66,7 +66,6 @@ class MockTransport(object):
         self.dumps = 0
         self.dumps_semaphore = tornado.locks.Semaphore(0)
         self.closed = False
-        self.n_substreams = n_substreams
         _current_transport = self
 
     @trollius.coroutine
@@ -229,9 +228,6 @@ class TestSimulationServer(object):
         self._telstate.add.assert_any_call('cbf_int_time', n_accs * 2 * 4096 / 1712000000.0, immutable=True)
         self._telstate.add.assert_any_call('cbf_n_accs', n_accs, immutable=True)
         self._telstate.add.assert_any_call('cbf_n_chans_per_substream', 256, immutable=True)
-        # Use assert_called_with here rather than assert_any_call, to ensure
-        # that it is the *last* call.
-        self._telstate.add.assert_called_with('sdp_cam2telstate_status', 'ready', immutable=False)
 
     @cuda_test
     @async_test
@@ -254,8 +250,8 @@ class TestSimulationServer(object):
         yield self._configure_subarray()
         name = 'i0.tied-array-channelised-voltage.0x'
         uname = 'i0_tied_array_channelised_voltage_0x'
-        yield self.make_request('stream-create-beamformer', name, 1712000000, 1284000000, 856000000, 4096, 256, 8)
-        yield self.make_request('capture-destination', name, 'localhost:7149', 'lo', False, 4)
+        yield self.make_request('stream-create-beamformer', name, 1712000000, 1284000000, 856000000, 4096, 4, 256, 8)
+        yield self.make_request('capture-destination', name, 'localhost:7149', 'lo', False)
         yield self.make_request('capture-start', name)
         for i in range(min_dumps):
             yield _current_transport.dumps_semaphore.acquire()
@@ -264,7 +260,6 @@ class TestSimulationServer(object):
         assert_greater_equal(_current_transport.dumps, min_dumps)
         assert_true(_current_transport.closed)
         self._check_common_telstate()
-        print(self._telstate.add.mock_calls)
         self._telstate.add.assert_any_call('cbf_{}_n_chans'.format(uname), 4096, immutable=False)
         self._telstate.add.assert_any_call(
             'cbf_{}_n_chans_per_substream'.format(uname), 1024, immutable=True)
@@ -272,9 +267,6 @@ class TestSimulationServer(object):
         for i in range(4):   # input
             self._telstate.add.assert_any_call(
                 'cbf_{}_input{}_weight'.format(uname, i), 1.0, immutable=False)
-        # Use assert_called_with here rather than assert_any_call, to ensure
-        # that it is the *last* call.
-        self._telstate.add.assert_called_with('sdp_cam2telstate_status', 'ready', immutable=False)
 
     @async_test
     @tornado.gen.coroutine
@@ -306,7 +298,7 @@ class TestSimulationServer(object):
         a capture is in progress."""
         yield self._configure_subarray()
         # Use lower bandwidth to reduce test time
-        yield self.make_request('stream-create-beamformer', 'beam1', 1712000000, 1284000000, 856000000 / 4, 32768, 256, 8)
+        yield self.make_request('stream-create-beamformer', 'beam1', 1712000000, 1284000000, 856000000 / 4, 32768, 16, 256, 8)
         yield self.make_request('capture-destination', 'beam1', 'localhost:7149')
         yield self.make_request('capture-start', 'beam1')
         yield self.assert_request_fails('^cannot add antennas while capture is in progress$', 'antenna-add', 'm062, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -1440.69968823 -2269.26759132 6.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22')
