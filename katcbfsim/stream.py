@@ -14,21 +14,31 @@ from . import rime, source
 logger = logging.getLogger(__name__)
 
 
-class CaptureInProgressError(RuntimeError):
+class StreamError(RuntimeError):
+    """Base class for user errors relating to streams or subarrays."""
+    pass
+
+
+class CaptureInProgressError(StreamError):
     """Exception thrown when trying to modify some value that may not be
     modified while data capture is running.
     """
     pass
 
 
-class IncompleteConfigError(RuntimeError):
-    """Exception thrown when requesting capture but the stream or subarray
-    is missing necessary configuration.
+class StreamExistsError(StreamError):
+    """Exception thrown when trying to modify some value that may not be
+    modified after a stream has been created on the subarray.
     """
     pass
 
 
-class UnsupportedStreamError(RuntimeError):
+class ConfigError(StreamError):
+    """Exception thrown when the stream or subarray has missing or invalid configuration."""
+    pass
+
+
+class UnsupportedStreamError(StreamError):
     """Exception thrown for operations not supported on this stream type."""
     pass
 
@@ -36,32 +46,42 @@ class UnsupportedStreamError(RuntimeError):
 class Subarray(object):
     """Model of an array, the sky, and possibly other simulation parameters,
     shared by several data streams. A subarray should first be configured
-    before starting capture on any of the corresponding streams, and must
-    remain immutable (except where noted) while any stream is capturing.
+    before creating streams. Attributes fall into three classes (documented on
+    each attribute):
+
+      1. Mutable: can be safely changed at any time.
+      2. Capture-immutable: can be changed provided no captures are in progress
+         (otherwise a :exc:`CaptureInProgressError` is raised).
+      3. Stream-immutable: can be changed only until a stream is created
+         (otherwise a :exc:`StreamExistsError` is raised).
+
     This is partly enforced by exceptions thrown from setters, but the
-    :attr:`antennas` and :attr:`sources` attributes are mutable lists and so
-    suitable care must be taken.
+    :attr:`antennas` and :attr:`sources` attributes are mutable lists and
+    must only be manipulated by :meth:`add_antenna` and :meth:`add_source`.
 
     Attributes
     ----------
     antennas : list of :class:`katpoint.Antenna`
-        The antennas in the simulated array.
+        The antennas in the simulated array. The values are
+        capture-immutable, while the list size is stream-immutable.
     sources : list of :class:`katcbfsim.source.Source`
         The simulated sources. Only point sources are currently supported.
         The do not necessarily have to be radec targets, and the position
-        and flux model can safely be changed on the fly.
+        and flux model are mutable, but the list size is capture-immutable.
     target : :class:`katpoint.Target`
         Target. This determines the phase center for the simulation (and
-        eventually the center for the beam model as well).
+        eventually the center for the beam model as well). Mutable.
     sync_time : :class:`katpoint.Timestamp`
         Start time for the simulated capture. When set, it is truncated to a
-        whole number of seconds.
+        whole number of seconds. Stream-immutable.
     gain : float
-        Expected output visibility value, per Jansky per Hz per second
+        Expected output visibility value, per Jansky per Hz per second.
+        Capture-immutable.
     clock_ratio : float
         Scale factor between virtual time in the simulation and wall clock
         time. Smaller values will run the simulation faster; setting it to 0
         will cause the simulation to run as fast as possible.
+        Capture-immutable.
     """
     def __init__(self):
         self.antennas = []
@@ -71,7 +91,8 @@ class Subarray(object):
         self._sync_time = katpoint.Timestamp()
         self._gain = 1e-4
         self._clock_ratio = 1.0
-        self.capturing = 0     # Number of stream that are capturing
+        self.streams = 0       # Total number of streams created from this subarray
+        self.capturing = 0     # Number of streams that are capturing
 
     def add_antenna(self, antenna):
         """Add a new antenna to the simulation, or replace an existing one.
@@ -90,13 +111,14 @@ class Subarray(object):
             If any associated stream has a capture is in progress
         """
         if self.capturing:
-            raise CaptureInProgressError('cannot add antennas while capture is in progress')
+            raise CaptureInProgressError('cannot modify antennas while capture is in progress')
         for i in range(len(self.antennas)):
             if self.antennas[i].name == antenna.name:
                 self.antennas[i] = antenna
-                break
-        else:
-            self.antennas.append(antenna)
+                return
+        if self.streams:
+            raise StreamExistsError('cannot add new antennas after creating a stream')
+        self.antennas.append(antenna)
 
     def add_source(self, source):
         """Add a new source to the simulation.
@@ -138,8 +160,8 @@ class Subarray(object):
 
     @sync_time.setter
     def sync_time(self, value):
-        if self.capturing:
-            raise CaptureInProgressError('cannot set sync time while capture is in progress')
+        if self.streams:
+            raise CaptureInProgressError('cannot set sync time after creating a stream')
         self._sync_time = katpoint.Timestamp(int(value.secs))
 
     @property
@@ -224,6 +246,10 @@ class Stream(object):
         else:
             self.loop = loop
         self._last_warn_behind = 0
+        self.subarray.streams += 1
+
+    def __del__(self):
+        self.subarray.streams -= 1
 
     def __setattr__(self, key, value):
         # Prevent modifications while capture is in progress
@@ -254,14 +280,14 @@ class Stream(object):
 
         Raises
         ------
-        IncompleteConfigError
+        ConfigError
             if no destination is defined
         """
         if self.capturing:
             logger.warn('Ignoring attempt to start capture when already running')
             return
         if not self.transport_factories:
-            raise IncompleteConfigError('no destination specified')
+            raise ConfigError('no destination specified')
         self.subarray.capturing += 1
         # Create a future that is set by capture_stop
         self._stop_future = trollius.Future(loop=self.loop)
@@ -376,9 +402,16 @@ class CBFStream(Stream):
         If not ``None``, limits the number of dumps that will be done
     scale_factor_timestamp : int
         Number of timestamp increments per second
+
+    Raises
+    ------
+    ConfigError
+        if there are no antennas defined
     """
     def __init__(self, subarray, name, adc_rate, center_frequency, bandwidth,
                  n_channels, n_substreams=None, loop=None):
+        if not subarray.antennas:
+            raise ConfigError('no antennas defined')
         super(CBFStream, self).__init__(subarray, name, loop)
         self.adc_rate = adc_rate
         self.center_frequency = center_frequency
@@ -392,7 +425,7 @@ class CBFStream(Stream):
             while n_substreams < self.n_antennas * 4:
                 n_substreams *= 2
         if n_channels % n_substreams:
-            raise ValueError('Number of channels not divisible by number of substreams')
+            raise ConfigError('Number of channels not divisible by number of substreams')
         self.n_substreams = n_substreams
         self.n_dumps = None
         # This is what real CBF uses, even though it wraps pretty quickly
@@ -530,17 +563,15 @@ class FXStream(CBFStream):
 
         Raises
         ------
-        IncompleteConfigError
-            if the subarray has no antennas, or no target
-        IncompleteConfigError
+        ConfigError
+            if the subarray has no target
+        ConfigError
             if no destination is defined
         """
-        if not self.subarray.antennas:
-            raise IncompleteConfigError('no antennas defined')
         if not self.transport_factories:
-            raise IncompleteConfigError('no destination specified')
+            raise ConfigError('no destination specified')
         if self.subarray.target_at(self.subarray.sync_time) is None:
-            raise IncompleteConfigError('no target set')
+            raise ConfigError('no target set')
         self.subarray.ensure_source(self.subarray.sync_time)
         super(FXStream, self).capture_start()
 
@@ -779,7 +810,7 @@ class BeamformerStream(CBFStream):
         elif sample_bits == 32:
             self.dtype = np.int32
         else:
-            raise ValueError('sample_bits must be 8, 16 or 32')
+            raise ConfigError('sample_bits must be 8, 16 or 32')
 
     @property
     def interval(self):

@@ -301,12 +301,23 @@ class TestSimulationServer(object):
         yield self.make_request('stream-create-beamformer', 'beam1', 1712000000, 1284000000, 856000000 / 4, 32768, 16, 256, 8)
         yield self.make_request('capture-destination', 'beam1', 'localhost:7149')
         yield self.make_request('capture-start', 'beam1')
-        yield self.assert_request_fails('^cannot add antennas while capture is in progress$', 'antenna-add', 'm062, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -1440.69968823 -2269.26759132 6.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22')
+        yield self.assert_request_fails('^cannot modify antennas while capture is in progress$', 'antenna-add', 'm062, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -1440.69968823 -2269.26759132 6.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22')
         yield self.assert_request_fails('^cannot add source while capture is in progress$', 'source-add', 'test3, radec, 3:30:00.00, -35:00:00.0, (500.0 2000.0 1.0)')
-        yield self.assert_request_fails('^cannot set sync time while capture is in progress$', 'sync-time', 1446544133)
         yield self.assert_request_fails('^cannot set clock ratio while capture is in progress$', 'clock-ratio', 1.0)
         yield self.assert_request_fails('^cannot set center_frequency while capture is in progress', 'frequency-select', 'beam1', 10000000000)
         yield self.make_request('capture-stop', 'beam1')
+
+    @async_test
+    @tornado.gen.coroutine
+    def test_change_while_streams_exist(self):
+        """An appropriate error is returned when trying to change values while
+        a stream exists."""
+        yield self._configure_subarray()
+        yield self.make_request('stream-create-beamformer', 'beam1', 1712000000, 1284000000, 856000000, 32768, 16, 256, 8)
+        yield self.assert_request_fails('^cannot add new antennas after creating a stream$',
+            'antenna-add', 'm123, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -1440.69968823 -2269.26759132 6.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22')
+        yield self.assert_request_fails('^cannot set sync time after creating a stream$',
+            'sync-time', 1446544133)
 
     @tornado.gen.coroutine
     def _get_antenna_descriptions(self):

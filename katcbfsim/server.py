@@ -13,8 +13,7 @@ from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
 import katsdpservices
 import katcbfsim
 from . import transport
-from .stream import (Subarray, FXStream, BeamformerStream,
-                     CaptureInProgressError, IncompleteConfigError, UnsupportedStreamError)
+from .stream import (Subarray, FXStream, BeamformerStream, StreamError, UnsupportedStreamError)
 from .source import Source
 
 logger = logging.getLogger(__name__)
@@ -66,9 +65,7 @@ def _stream_exceptions(wrapped):
     def wrapper(*args, **kwargs):
         try:
             return wrapped(*args, **kwargs)
-        except (CaptureInProgressError,
-                IncompleteConfigError,
-                UnsupportedStreamError) as e:
+        except StreamError as e:
             return 'fail', str(e)
     functools.update_wrapper(wrapper, wrapped)
     return wrapper
@@ -465,7 +462,7 @@ class SimulatorServer(katcp.DeviceServer):
             try:
                 antenna = telstate[attribute_name]
             except KeyError:
-                logger.warn('Antenna description for %s not found, skipping', name)
+                raise ConfigError('Antenna description for {} not found'.format(name))
             else:
                 # It might be either a string or an object at this point.
                 # The constructor handles either case.
