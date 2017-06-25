@@ -18,6 +18,12 @@ from katcbfsim import server, stream, transport
 from nose.tools import *
 
 
+M062_DESCRIPTION = 'm062, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -1440.69968823 -2269.26759132 6.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22'
+M063_DESCRIPTION = 'm063, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -3419.58251626 -1606.01510973 2.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22'
+# Modified version of m062, to test antenna replacement
+M062_ALT_DESCRIPTION = 'm062, -30:00:00.0, 21:26:38.0, 1035.0, 13.5, -1440.69968823 -2269.26759132 6.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22'
+
+
 def test_endpoints_to_str():
     endpoints = [
         Endpoint('hostname', 1234),
@@ -172,8 +178,8 @@ class TestSimulationServer(object):
         if clock_ratio is None:
             clock_ratio = 0.5    # Run faster than real-time
         yield self.make_request('clock-ratio', clock_ratio)
-        yield self.make_request('antenna-add', 'm062, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -1440.69968823 -2269.26759132 6.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22')
-        yield self.make_request('antenna-add', 'm063, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -3419.58251626 -1606.01510973 2.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22')
+        yield self.make_request('antenna-add', M062_DESCRIPTION)
+        yield self.make_request('antenna-add', M063_DESCRIPTION)
         # One source with a flux model, one without
         yield self.make_request('source-add', 'test1, radec, 3:30:00.00, -35:00:00.0, (500.0 2000.0 1.0)')
         yield self.make_request('source-add', 'test2, radec, 3:33:00.00, -35:01:00.0')
@@ -301,7 +307,7 @@ class TestSimulationServer(object):
         yield self.make_request('stream-create-beamformer', 'beam1', 1712000000, 1284000000, 856000000 / 4, 32768, 16, 256, 8)
         yield self.make_request('capture-destination', 'beam1', 'localhost:7149')
         yield self.make_request('capture-start', 'beam1')
-        yield self.assert_request_fails('^cannot modify antennas while capture is in progress$', 'antenna-add', 'm062, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -1440.69968823 -2269.26759132 6.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22')
+        yield self.assert_request_fails('^cannot modify antennas while capture is in progress$', 'antenna-add', M062_DESCRIPTION)
         yield self.assert_request_fails('^cannot add source while capture is in progress$', 'source-add', 'test3, radec, 3:30:00.00, -35:00:00.0, (500.0 2000.0 1.0)')
         yield self.assert_request_fails('^cannot set clock ratio while capture is in progress$', 'clock-ratio', 1.0)
         yield self.assert_request_fails('^cannot set center_frequency while capture is in progress', 'frequency-select', 'beam1', 10000000000)
@@ -330,14 +336,41 @@ class TestSimulationServer(object):
         """Adding an antenna with a duplicate name replaces the existing one."""
         yield self._configure_subarray()
         antennas = yield self._get_antenna_descriptions()
-        assert_equal([
-            'm062, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -1440.69968823 -2269.26759132 6.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22',
-            'm063, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -3419.58251626 -1606.01510973 2.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22'],
-            antennas)
+        assert_equal([M062_DESCRIPTION, M063_DESCRIPTION], antennas)
         # Change the latitude, to check that the old value is replaced
-        yield self.make_request('antenna-add', 'm062, -30:00:00.0, 21:26:38.0, 1035.0, 13.5, -1440.69968823 -2269.26759132 6.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22')
+        yield self.make_request('antenna-add', M062_ALT_DESCRIPTION)
         antennas = yield self._get_antenna_descriptions()
-        assert_equal([
-            'm062, -30:00:00.0, 21:26:38.0, 1035.0, 13.5, -1440.69968823 -2269.26759132 6.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22',
-            'm063, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -3419.58251626 -1606.01510973 2.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22'],
-            antennas)
+        assert_equal([M062_ALT_DESCRIPTION, M063_DESCRIPTION], antennas)
+
+    @async_test
+    @tornado.gen.coroutine
+    def test_configure_subarray_from_telstate(self):
+        """Success case for configure-subarray-from-telstate request"""
+        # This is a somewhat fragile test because it doesn't fully
+        # simulate telstate, but the fakeredis telstate is a singleton
+        # and so leaks state across tests.
+        telstate = {
+            'config': {'antenna_mask': 'm062,m063'},
+            'm062_observer': M062_DESCRIPTION,
+            'm063_observer': M063_DESCRIPTION
+        }
+        telstate = katsdptelstate.TelescopeState()
+        telstate.add('config', {'antenna_mask': 'm062,m063'}, immutable=True)
+        telstate.add('m062_observer', M062_DESCRIPTION, immutable=True)
+        telstate.add('m063_observer', M063_DESCRIPTION, immutable=True)
+        self._server._telstate = telstate
+        yield self.make_request('configure-subarray-from-telstate')
+        antennas = yield self._get_antenna_descriptions()
+        assert_equal([M062_DESCRIPTION, M063_DESCRIPTION], antennas)
+
+    @async_test
+    @tornado.gen.coroutine
+    def test_configure_subarray_from_telstate_missing_antenna(self):
+        telstate = {
+            'config': {'antenna_mask': 'm062,m063'},
+            'm062_observer': M062_DESCRIPTION
+        }
+        self._server._telstate = telstate
+        yield self.assert_request_fails(
+            '^Antenna description for m063 not found$',
+            'configure-subarray-from-telstate')
