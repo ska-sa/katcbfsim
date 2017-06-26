@@ -14,21 +14,31 @@ from . import rime, source
 logger = logging.getLogger(__name__)
 
 
-class CaptureInProgressError(RuntimeError):
+class StreamError(RuntimeError):
+    """Base class for user errors relating to streams or subarrays."""
+    pass
+
+
+class CaptureInProgressError(StreamError):
     """Exception thrown when trying to modify some value that may not be
     modified while data capture is running.
     """
     pass
 
 
-class IncompleteConfigError(RuntimeError):
-    """Exception thrown when requesting capture but the stream or subarray
-    is missing necessary configuration.
+class StreamExistsError(StreamError):
+    """Exception thrown when trying to modify some value that may not be
+    modified after a stream has been created on the subarray.
     """
     pass
 
 
-class UnsupportedStreamError(RuntimeError):
+class ConfigError(StreamError):
+    """Exception thrown when the stream or subarray has missing or invalid configuration."""
+    pass
+
+
+class UnsupportedStreamError(StreamError):
     """Exception thrown for operations not supported on this stream type."""
     pass
 
@@ -36,32 +46,42 @@ class UnsupportedStreamError(RuntimeError):
 class Subarray(object):
     """Model of an array, the sky, and possibly other simulation parameters,
     shared by several data streams. A subarray should first be configured
-    before starting capture on any of the corresponding streams, and must
-    remain immutable (except where noted) while any stream is capturing.
+    before creating streams. Attributes fall into three classes (documented on
+    each attribute):
+
+      1. Mutable: can be safely changed at any time.
+      2. Capture-immutable: can be changed provided no captures are in progress
+         (otherwise a :exc:`CaptureInProgressError` is raised).
+      3. Stream-immutable: can be changed only until a stream is created
+         (otherwise a :exc:`StreamExistsError` is raised).
+
     This is partly enforced by exceptions thrown from setters, but the
-    :attr:`antennas` and :attr:`sources` attributes are mutable lists and so
-    suitable care must be taken.
+    :attr:`antennas` and :attr:`sources` attributes are mutable lists and
+    must only be manipulated by :meth:`add_antenna` and :meth:`add_source`.
 
     Attributes
     ----------
     antennas : list of :class:`katpoint.Antenna`
-        The antennas in the simulated array.
+        The antennas in the simulated array. The values are
+        capture-immutable, while the list size is stream-immutable.
     sources : list of :class:`katcbfsim.source.Source`
         The simulated sources. Only point sources are currently supported.
         The do not necessarily have to be radec targets, and the position
-        and flux model can safely be changed on the fly.
+        and flux model are mutable, but the list size is capture-immutable.
     target : :class:`katpoint.Target`
         Target. This determines the phase center for the simulation (and
-        eventually the center for the beam model as well).
+        eventually the center for the beam model as well). Mutable.
     sync_time : :class:`katpoint.Timestamp`
         Start time for the simulated capture. When set, it is truncated to a
-        whole number of seconds.
+        whole number of seconds. Stream-immutable.
     gain : float
-        Expected output visibility value, per Jansky per Hz per second
+        Expected output visibility value, per Jansky per Hz per second.
+        Capture-immutable.
     clock_ratio : float
         Scale factor between virtual time in the simulation and wall clock
         time. Smaller values will run the simulation faster; setting it to 0
         will cause the simulation to run as fast as possible.
+        Capture-immutable.
     """
     def __init__(self):
         self.antennas = []
@@ -71,7 +91,8 @@ class Subarray(object):
         self._sync_time = katpoint.Timestamp()
         self._gain = 1e-4
         self._clock_ratio = 1.0
-        self.capturing = 0     # Number of stream that are capturing
+        self.streams = 0       # Total number of streams created from this subarray
+        self.capturing = 0     # Number of streams that are capturing
 
     def add_antenna(self, antenna):
         """Add a new antenna to the simulation, or replace an existing one.
@@ -90,13 +111,14 @@ class Subarray(object):
             If any associated stream has a capture is in progress
         """
         if self.capturing:
-            raise CaptureInProgressError('cannot add antennas while capture is in progress')
+            raise CaptureInProgressError('cannot modify antennas while capture is in progress')
         for i in range(len(self.antennas)):
             if self.antennas[i].name == antenna.name:
                 self.antennas[i] = antenna
-                break
-        else:
-            self.antennas.append(antenna)
+                return
+        if self.streams:
+            raise StreamExistsError('cannot add new antennas after creating a stream')
+        self.antennas.append(antenna)
 
     def add_source(self, source):
         """Add a new source to the simulation.
@@ -138,8 +160,8 @@ class Subarray(object):
 
     @sync_time.setter
     def sync_time(self, value):
-        if self.capturing:
-            raise CaptureInProgressError('cannot set sync time while capture is in progress')
+        if self.streams:
+            raise CaptureInProgressError('cannot set sync time after creating a stream')
         self._sync_time = katpoint.Timestamp(int(value.secs))
 
     @property
@@ -224,6 +246,10 @@ class Stream(object):
         else:
             self.loop = loop
         self._last_warn_behind = 0
+        self.subarray.streams += 1
+
+    def __del__(self):
+        self.subarray.streams -= 1
 
     def __setattr__(self, key, value):
         # Prevent modifications while capture is in progress
@@ -254,14 +280,14 @@ class Stream(object):
 
         Raises
         ------
-        IncompleteConfigError
+        ConfigError
             if no destination is defined
         """
         if self.capturing:
             logger.warn('Ignoring attempt to start capture when already running')
             return
         if not self.transport_factories:
-            raise IncompleteConfigError('no destination specified')
+            raise ConfigError('no destination specified')
         self.subarray.capturing += 1
         # Create a future that is set by capture_stop
         self._stop_future = trollius.Future(loop=self.loop)
@@ -354,6 +380,9 @@ class CBFStream(Stream):
         Bandwidth of all channels in the stream, in Hz
     n_channels : int
         Number of channels in the stream
+    n_substreams : int, optional
+        Number of substreams (X/B-engines). If not specified, a default
+        will be computed to match the MeerKAT CBF.
     loop : :class:`trollius.BaseEventLoop`, optional
         Event loop for coroutines
 
@@ -367,21 +396,92 @@ class CBFStream(Stream):
         Bandwidth of all channels in the stream, in Hz
     n_channels : int
         Number of channels in the stream
+    n_substreams : int
+        Number of substreams (X/B-engines)
     n_dumps : int
         If not ``None``, limits the number of dumps that will be done
     scale_factor_timestamp : int
         Number of timestamp increments per second
+
+    Raises
+    ------
+    ConfigError
+        if there are no antennas defined
     """
     def __init__(self, subarray, name, adc_rate, center_frequency, bandwidth,
-                 n_channels, loop=None):
+                 n_channels, n_substreams=None, loop=None):
+        if not subarray.antennas:
+            raise ConfigError('no antennas defined')
         super(CBFStream, self).__init__(subarray, name, loop)
         self.adc_rate = adc_rate
         self.center_frequency = center_frequency
         self.bandwidth = bandwidth
         self.n_channels = n_channels
+        if not n_substreams:
+            # This is based on the MeerKAT CBF instruments, which support
+            # power-of-two numbers of antennas (minimum 4), with 4 substreams
+            # per antenna.
+            n_substreams = 16
+            while n_substreams < self.n_antennas * 4:
+                n_substreams *= 2
+        if n_channels % n_substreams:
+            raise ConfigError('Number of channels not divisible by number of substreams')
+        self.n_substreams = n_substreams
         self.n_dumps = None
         # This is what real CBF uses, even though it wraps pretty quickly
         self.scale_factor_timestamp = adc_rate
+
+    def sensor(self, telstate, key, value, immutable=True):
+        try:
+            telstate.add(key, value, immutable=immutable)
+        except katsdptelstate.ImmutableKeyError:
+            logger.error('Could not set %s to %r because it already has a different value',
+                         key, value)
+
+    @classmethod
+    def _make_prefix(cls, scope):
+        """Creates a prefix for a sensor name. If `scope` is ``None``, returns
+        :samp:`cbf_`, otherwise :samp:`cbf_{scope}_` where the scope is
+        underscore-normalised.
+        """
+        if scope is None:
+            return 'cbf_'
+        else:
+            scope = scope.replace('.', '_').replace('-', '_')
+            return 'cbf_{}_'.format(scope)
+
+    def _instrument_sensors(self, telstate):
+        pre = self._make_prefix(None)   # instrument names not used yet
+        # Only the sensors captured by cam2telstate are simulated
+        self.sensor(telstate, pre + 'adc_sample_rate', float(self.adc_rate))
+        self.sensor(telstate, pre + 'bandwidth', float(self.bandwidth))
+        self.sensor(telstate, pre + 'scale_factor_timestamp', float(self.scale_factor_timestamp))
+        self.sensor(telstate, pre + 'sync_time', self.subarray.sync_time.secs)
+        self.sensor(telstate, pre + 'n_inputs', 2 * self.n_antennas)
+
+    def _antenna_channelised_voltage_sensors(self, telstate):
+        pre = self._make_prefix(None)      # stream name not used yet
+        for i in range(2 * self.n_antennas):
+            input_pre = pre + 'input{}_'.format(i)
+            # These are all arbitrary dummy values
+            self.sensor(telstate, input_pre + 'delay', (0, 0, 0, 0, 0), immutable=False)
+            self.sensor(telstate, input_pre + 'delay_ok', True, immutable=False)
+            self.sensor(telstate, input_pre + 'eq', [200 + 0j], immutable=False)
+            self.sensor(telstate, input_pre + 'fft0_shift', 32767, immutable=False)
+        # Need to report the baseband center frequency
+        center_frequency = self.center_frequency % self.bandwidth
+        self.sensor(telstate, pre + 'center_freq', float(center_frequency))
+        self.sensor(telstate, pre + 'n_chans', self.n_channels)
+        self.sensor(telstate, pre + 'ticks_between_spectra',
+                    self.n_channels * self.scale_factor_timestamp // self.bandwidth)
+
+    def set_telstate(self, telstate):
+        """Populate telstate with simulated sensors for the stream.
+
+        Subclasses overload this to set stream-specific sensors.
+        """
+        self._instrument_sensors(telstate)
+        self._antenna_channelised_voltage_sensors(telstate)
 
 
 class FXStream(CBFStream):
@@ -389,6 +489,8 @@ class FXStream(CBFStream):
 
     Parameters
     ----------
+    telstate : :class:`katsdptelstate.TelescopeState`
+        Telescope state to populate with simulated sensors
     context : katsdpsigproc context
         Device context
     subarray : :class:`Subarray`
@@ -403,6 +505,8 @@ class FXStream(CBFStream):
         Bandwidth of all channels in the stream, in Hz
     n_channels : int
         Number of channels in the stream
+    n_substreams : int
+        Number of substreams (X-engines)
     loop : :class:`trollius.BaseEventLoop`, optional
         Event loop for coroutines
 
@@ -421,9 +525,9 @@ class FXStream(CBFStream):
         indirectly by writing to :attr:`accumulation_length`.
     """
     def __init__(self, context, subarray, name, adc_rate,
-                 center_frequency, bandwidth, n_channels, loop=None):
-        super(FXStream, self).__init__(subarray, name, adc_rate, center_frequency, bandwidth,
-                                        n_channels, loop)
+                 center_frequency, bandwidth, n_channels, n_substreams, loop=None):
+        super(FXStream, self).__init__(subarray, name, adc_rate, center_frequency,
+                                       bandwidth, n_channels, n_substreams, loop)
         self.context = context
         self.accumulation_length = 0.5
         self.sefd = 400.0   # Jansky
@@ -459,17 +563,15 @@ class FXStream(CBFStream):
 
         Raises
         ------
-        IncompleteConfigError
-            if the subarray has no antennas, or no target
-        IncompleteConfigError
+        ConfigError
+            if the subarray has no target
+        ConfigError
             if no destination is defined
         """
-        if not self.subarray.antennas:
-            raise IncompleteConfigError('no antennas defined')
         if not self.transport_factories:
-            raise IncompleteConfigError('no destination specified')
+            raise ConfigError('no destination specified')
         if self.subarray.target_at(self.subarray.sync_time) is None:
-            raise IncompleteConfigError('no target set')
+            raise ConfigError('no target set')
         self.subarray.ensure_source(self.subarray.sync_time)
         super(FXStream, self).capture_start()
 
@@ -630,6 +732,25 @@ class FXStream(CBFStream):
             if transport is not None:
                 yield From(transport.close())
 
+    def _baseline_correlation_products_sensors(self, telstate):
+        pre = self._make_prefix(None)   # Name not currently used in sensors for this stream
+        baselines = []
+        for i in range(self.n_antennas):
+            for j in range(i, self.n_antennas):
+                for pol1 in ('v', 'h'):
+                    for pol2 in ('v', 'h'):
+                        name1 = self.subarray.antennas[i].name + pol1
+                        name2 = self.subarray.antennas[j].name + pol2
+                        baselines.append((name1, name2))
+        self.sensor(telstate, pre + 'bls_ordering', baselines)
+        self.sensor(telstate, pre + 'int_time', self.accumulation_length)
+        self.sensor(telstate, pre + 'n_accs', self.n_accs)
+        self.sensor(telstate, pre + 'n_chans_per_substream', self.n_channels // self.n_substreams)
+
+    def set_telstate(self, telstate):
+        super(FXStream, self).set_telstate(telstate)
+        self._baseline_correlation_products_sensors(telstate)
+
 
 class BeamformerStream(CBFStream):
     """Simulated beam-former. The individual antennas are not simulated, but
@@ -649,6 +770,8 @@ class BeamformerStream(CBFStream):
         Bandwidth of all channels in the stream, in Hz
     n_channels : int
         Number of channels in the stream
+    n_substreams : int
+        Number of substreams (B-engines)
     timesteps : int
         Number of samples in time accumulated into a single update. This is
         used by :class:`BeamformerSpeadTransport` to decide the data shape.
@@ -674,9 +797,10 @@ class BeamformerStream(CBFStream):
         Equivalent to :attr:`interval`, but in wall-clock time
     """
     def __init__(self, subarray, name, adc_rate, center_frequency, bandwidth,
-                 n_channels, timesteps, sample_bits, loop=None):
+                 n_channels, n_substreams, timesteps, sample_bits, loop=None):
         super(BeamformerStream, self).__init__(
-                subarray, name, adc_rate, center_frequency, bandwidth, n_channels, loop)
+                subarray, name, adc_rate, center_frequency, bandwidth,
+                n_channels, n_substreams, loop)
         self.timesteps = timesteps
         self.sample_bits = sample_bits
         if sample_bits == 8:
@@ -686,7 +810,7 @@ class BeamformerStream(CBFStream):
         elif sample_bits == 32:
             self.dtype = np.int32
         else:
-            raise ValueError('sample_bits must be 8, 16 or 32')
+            raise ConfigError('sample_bits must be 8, 16 or 32')
 
     @property
     def interval(self):
@@ -748,3 +872,15 @@ class BeamformerStream(CBFStream):
             if transports is not None:
                 for transport in transports:
                     yield From(transport.close())
+
+    def _tied_array_channelised_voltage_sensors(self, telstate):
+        pre = self._make_prefix(self.name)
+        self.sensor(telstate, pre + 'n_chans', self.n_channels, immutable=False)
+        self.sensor(telstate, pre + 'n_chans_per_substream', self.n_channels // self.n_substreams)
+        self.sensor(telstate, pre + 'spectra_per_heap', self.timesteps)
+        for i in range(2 * self.n_antennas):
+            self.sensor(telstate, '{}input{}_weight'.format(pre, i), 1.0, immutable=False)
+
+    def set_telstate(self, telstate):
+        super(BeamformerStream, self).set_telstate(telstate)
+        self._tied_array_channelised_voltage_sensors(telstate)

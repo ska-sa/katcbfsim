@@ -9,7 +9,6 @@ import numpy as np
 import spead2
 import spead2.send
 import spead2.send.trollius
-import katsdptelstate
 import katsdpservices
 import concurrent.futures
 import h5py
@@ -19,66 +18,48 @@ from collections import deque
 logger = logging.getLogger(__name__)
 
 
-def num_substreams(stream):
-    """Determine the number of substreams to use for a stream.
-
-    This is based on the MeerKAT CBF instruments, which support power-of-two
-    numbers of antennas (minimum 4), with 4 substreams per antenna.
-    """
-    n_substreams = 16
-    while n_substreams < stream.n_antennas * 4:
-        n_substreams *= 2
-    return n_substreams
-
-
 class EndpointFactory(object):
-    def __init__(self, cls, endpoints, ifaddr, ibv, n_substreams, max_packet_size):
+    def __init__(self, cls, endpoints, ifaddr, ibv, max_packet_size):
         self.cls = cls
         self.endpoints = endpoints
         self.ifaddr = ifaddr
         self.ibv = ibv
-        self.n_substreams = n_substreams
         if max_packet_size is None:
             max_packet_size = 4096
         self.max_packet_size = max_packet_size
 
     def __call__(self, stream):
         return self.cls(self.endpoints, self.ifaddr, self.ibv,
-                        self.n_substreams, self.max_packet_size, stream)
+                        self.max_packet_size, stream)
 
 
 class SpeadTransport(object):
     """Base class for SPEAD streams, providing a factory function."""
     @classmethod
-    def factory(cls, endpoints, ifaddr, ibv, n_substreams, max_packet_size):
-        return EndpointFactory(cls, endpoints, ifaddr, ibv, n_substreams, max_packet_size)
+    def factory(cls, endpoints, ifaddr, ibv, max_packet_size):
+        return EndpointFactory(cls, endpoints, ifaddr, ibv, max_packet_size)
 
     @property
     def n_endpoints(self):
         return len(self.endpoints)
 
-    def __init__(self, endpoints, ifaddr, ibv, n_substreams, max_packet_size, stream, in_rate):
+    def __init__(self, endpoints, ifaddr, ibv, max_packet_size, stream, in_rate):
         if not endpoints:
             raise ValueError('At least one endpoint is required')
         n = len(endpoints)
-        if n_substreams is None:
-            n_substreams = num_substreams(stream)
-        if stream.n_channels % n_substreams:
-            raise ValueError('Number of channels not divisible by number of substreams')
-        if n_substreams % n:
+        if stream.n_substreams % n:
             raise ValueError('Number of substreams not divisible by number of endpoints')
         self.endpoints = endpoints
         self.stream = stream
-        self.n_substreams = n_substreams
         self._flavour = spead2.Flavour(4, 64, 48, 0)
         self._inline_format = [('u', self._flavour.heap_address_bits)]
         # Send at a slightly higher rate, to account for overheads, and so
         # that if the sender sends a burst we can catch up with it.
-        out_rate = in_rate * 1.05 / n_substreams
+        out_rate = in_rate * 1.05 / stream.n_substreams
         config = spead2.send.StreamConfig(rate=out_rate, max_packet_size=max_packet_size)
         self._substreams = []
-        for i in range(n_substreams):
-            e = endpoints[i * len(endpoints) // n_substreams]
+        for i in range(stream.n_substreams):
+            e = endpoints[i * len(endpoints) // stream.n_substreams]
             kwargs = {}
             if ifaddr is not None:
                 kwargs['interface_address'] = ifaddr
@@ -89,7 +70,7 @@ class SpeadTransport(object):
                 stream_cls = spead2.send.trollius.UdpStream
             self._substreams.append(stream_cls(
                 spead2.ThreadPool(), e.host, e.port, config, **kwargs))
-            self._substreams[-1].set_cnt_sequence(i, n_substreams)
+            self._substreams[-1].set_cnt_sequence(i, stream.n_substreams)
 
     @trollius.coroutine
     def close(self):
@@ -109,7 +90,7 @@ class CBFSpeadTransport(SpeadTransport):
     """
     def __init__(self, *args, **kwargs):
         super(CBFSpeadTransport, self).__init__(*args, **kwargs)
-        self.ig_data = [self.make_ig_data() for i in range(self.n_substreams)]
+        self.ig_data = [self.make_ig_data() for i in range(self.stream.n_substreams)]
 
     def make_ig_data(self):
         ig = spead2.send.ItemGroup(flavour=self._flavour)
@@ -122,7 +103,7 @@ class CBFSpeadTransport(SpeadTransport):
     @trollius.coroutine
     def _send_metadata_endpoint(self, endpoint_idx):
         """Reissue all the metadata on the stream (for one endpoint)."""
-        substream_idx = endpoint_idx * self.n_substreams // self.n_endpoints
+        substream_idx = endpoint_idx * self.stream.n_substreams // self.n_endpoints
         substream = self._substreams[substream_idx]
         heap = self.ig_data[substream_idx].get_heap(descriptors='all', data='none')
         yield From(substream.async_send_heap(heap))
@@ -141,21 +122,22 @@ class CBFSpeadTransport(SpeadTransport):
 
 class FXSpeadTransport(CBFSpeadTransport):
     """Data stream from an FX correlator, sent over SPEAD."""
-    def __init__(self, endpoints, ifaddr, ibv, n_substreams, max_packet_size, stream):
+    def __init__(self, endpoints, ifaddr, ibv, max_packet_size, stream):
         if stream.wall_accumulation_length == 0:
             in_rate = 0
         else:
             in_rate = stream.n_baselines * stream.n_channels * 4 * 8 / \
                 stream.wall_accumulation_length
         super(FXSpeadTransport, self).__init__(
-            endpoints, ifaddr, ibv, n_substreams, max_packet_size, stream, in_rate)
+            endpoints, ifaddr, ibv, max_packet_size, stream, in_rate)
         self._last_metadata = 0   # Dump index of last periodic metadata
 
     def make_ig_data(self):
         ig = super(FXSpeadTransport, self).make_ig_data()
         # flags_xeng_raw is still TBD in the ICD, so omitted for now
         ig.add_item(0x1800, 'xeng_raw', 'Raw data stream from all the X-engines in the system. For KAT-7, this item represents a full spectrum (all frequency channels) assembled from lowest frequency to highest frequency. Each frequency channel contains the data for all baselines (n_bls given by SPEAD Id=0x1008). Each value is a complex number - two (real and imaginary) signed integers.',
-            (self.stream.n_channels // self.n_substreams, self.stream.n_baselines * 4, 2), np.int32)
+            (self.stream.n_channels // self.stream.n_substreams, self.stream.n_baselines * 4, 2),
+            np.int32)
         return ig
 
     @trollius.coroutine
@@ -165,7 +147,7 @@ class FXSpeadTransport(CBFSpeadTransport):
             yield From(self.send_metadata())
         assert vis.flags.c_contiguous, 'Visibility array must be contiguous'
         shape = (self.stream.n_channels, self.stream.n_baselines * 4, 2)
-        substream_channels = self.stream.n_channels // self.n_substreams
+        substream_channels = self.stream.n_channels // self.stream.n_substreams
         vis_view = vis.reshape(*shape)
         futures = []
         timestamp = dump_index * self.stream.n_accs * self.stream.n_channels * \
@@ -233,19 +215,20 @@ class FXFileTransport(FileTransport):
 
 class BeamformerSpeadTransport(CBFSpeadTransport):
     """Data stream from a beamformer, sent over SPEAD."""
-    def __init__(self, endpoints, ifaddr, ibv, n_substreams, max_packet_size, stream):
+    def __init__(self, endpoints, ifaddr, ibv, max_packet_size, stream):
         if stream.wall_interval == 0:
             in_rate = 0
         else:
             in_rate = stream.n_channels * stream.timesteps * 2 * stream.sample_bits / stream.wall_interval / 8
         super(BeamformerSpeadTransport, self).__init__(
-            endpoints, ifaddr, ibv, n_substreams, max_packet_size, stream, in_rate)
+            endpoints, ifaddr, ibv, max_packet_size, stream, in_rate)
         self._last_metadata = 0     # Dump index of last periodic metadata
 
     def make_ig_data(self):
         ig = super(BeamformerSpeadTransport, self).make_ig_data()
         ig.add_item(0x5000, 'bf_raw', 'Beamformer output for frequency-domain beam. User-defined name (out of band control). Record length depending on number of frequency channels and F-X packet size (xeng_acc_len).',
-            shape=(self.stream.n_channels // self.n_substreams, self.stream.timesteps, 2), dtype=self.stream.dtype)
+            shape=(self.stream.n_channels // self.stream.n_substreams, self.stream.timesteps, 2),
+            dtype=self.stream.dtype)
         return ig
 
     @trollius.coroutine
@@ -253,7 +236,7 @@ class BeamformerSpeadTransport(CBFSpeadTransport):
         if (index - self._last_metadata) * self.stream.interval >= 5.0:
             self._last_metadata = index
             yield From(self.send_metadata())
-        substream_channels = self.stream.n_channels // self.n_substreams
+        substream_channels = self.stream.n_channels // self.stream.n_substreams
         timestamp = index * self.stream.timesteps * self.stream.n_channels * \
                 self.stream.scale_factor_timestamp // self.stream.bandwidth
         # Truncate timestamp to the width of the field it is in
@@ -267,149 +250,3 @@ class BeamformerSpeadTransport(CBFSpeadTransport):
             heap = self.ig_data[i].get_heap()
             futures.append(substream.async_send_heap(heap))
         yield From(trollius.gather(*futures, loop=self.stream.loop))
-
-
-#############################################################################
-
-class TelstateFactory(object):
-    def __init__(self, cls, telstate, n_substreams, **kwargs):
-        self.cls = cls
-        self.telstate = telstate
-        self.n_substreams = n_substreams
-        self.kwargs = kwargs
-
-    def __call__(self, stream):
-        return self.cls(self.telstate, self.n_substreams, stream, **self.kwargs)
-
-
-class TelstateTransport(object):
-    """Transport that puts metadata into telstate. Sending data is a no-op."""
-    @classmethod
-    def factory(cls, telstate, n_substreams, **kwargs):
-        return TelstateFactory(cls, telstate, n_substreams, **kwargs)
-
-    def __init__(self, telstate, n_substreams, stream):
-        if not telstate:
-            raise ValueError('A telstate connection is required')
-        if n_substreams is None:
-            n_substreams = num_substreams(stream)
-        self.telstate = telstate
-        self.stream = stream
-        self.n_substreams = n_substreams
-
-    def sensor(self, key, value, immutable=True):
-        try:
-            self.telstate.add(key, value, immutable=immutable)
-        except katsdptelstate.ImmutableKeyError:
-            logger.error('Could not set %s to %r because it already has a different value',
-                         key, value)
-
-    def _send_metadata(self):
-        """Blocking implementation of :meth:`send_metadata`, run in a separate thread."""
-        pass
-
-    @trollius.coroutine
-    def send_metadata(self):
-        yield From(self.stream.loop.run_in_executor(self._executor, self._send_metadata))
-
-    @trollius.coroutine
-    def send(self, data, index):
-        pass
-
-    @trollius.coroutine
-    def close(self):
-        self._executor.shutdown()
-
-
-class CBFTelstateTransport(TelstateTransport):
-    """:class:`TelstateTransport` specialisation for streams derived from
-    antenna channelised voltages."""
-    def __init__(self, telstate, n_substreams, stream,
-                 instrument_name=None, stream_name=None,
-                 antenna_channelised_voltage_stream_name=None):
-        super(CBFTelstateTransport, self).__init__(telstate, n_substreams, stream)
-        self.instrument_name = instrument_name
-        self.stream_name = stream_name
-        self.antenna_channelised_voltage_stream_name = antenna_channelised_voltage_stream_name
-        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-
-    @classmethod
-    def _make_prefix(cls, scope):
-        """Creates a prefix for a sensor name. If `scope` is ``None``, returns
-        :samp:`cbf_`, otherwise :samp:`cbf_{scope}_` where the scope is
-        underscore-normalised.
-        """
-        if scope is None:
-            return 'cbf_'
-        else:
-            scope = scope.replace('.', '_').replace('-', '_')
-            return 'cbf_{}_'.format(scope)
-
-    def _instrument_sensors(self):
-        pre = self._make_prefix(self.instrument_name)
-        # Only the sensors captured by cam2telstate are simulated
-        self.sensor(pre + 'adc_sample_rate', float(self.stream.adc_rate))
-        self.sensor(pre + 'bandwidth', float(self.stream.bandwidth))
-        self.sensor(pre + 'scale_factor_timestamp', float(self.stream.scale_factor_timestamp))
-        self.sensor(pre + 'sync_time', self.stream.subarray.sync_time.secs)
-        self.sensor(pre + 'n_inputs', 2 * self.stream.n_antennas)
-
-    def _antenna_channelised_voltage_sensors(self):
-        pre = self._make_prefix(self.antenna_channelised_voltage_stream_name)
-        for i in range(2 * self.stream.n_antennas):
-            input_pre = pre + 'input{}_'.format(i)
-            # These are all arbitrary dummy values
-            self.sensor(input_pre + 'delay', (0, 0, 0, 0, 0), immutable=False)
-            self.sensor(input_pre + 'delay_ok', True, immutable=False)
-            self.sensor(input_pre + 'eq', [200 + 0j], immutable=False)
-            self.sensor(input_pre + 'fft0_shift', 32767, immutable=False)
-        # Need to report the baseband center frequency
-        center_frequency = self.stream.center_frequency % self.stream.bandwidth
-        self.sensor(pre + 'center_freq', float(center_frequency))
-        self.sensor(pre + 'n_chans', self.stream.n_channels)
-        self.sensor(pre + 'ticks_between_spectra',
-                    self.stream.n_channels * self.stream.scale_factor_timestamp // self.stream.bandwidth)
-
-    def _send_metadata(self):
-        super(CBFTelstateTransport, self)._send_metadata()
-        self._instrument_sensors()
-        self._antenna_channelised_voltage_sensors()
-
-
-class FXTelstateTransport(CBFTelstateTransport):
-    def _baseline_correlation_products_sensors(self):
-        pre = self._make_prefix(self.stream_name)
-        baselines = []
-        for i in range(self.stream.n_antennas):
-            for j in range(i, self.stream.n_antennas):
-                for pol1 in ('v', 'h'):
-                    for pol2 in ('v', 'h'):
-                        name1 = self.stream.subarray.antennas[i].name + pol1
-                        name2 = self.stream.subarray.antennas[j].name + pol2
-                        baselines.append((name1, name2))
-        self.sensor(pre + 'bls_ordering', baselines)
-        self.sensor(pre + 'int_time', self.stream.accumulation_length)
-        self.sensor(pre + 'n_accs', self.stream.n_accs)
-        self.sensor(pre + 'n_chans_per_substream', self.stream.n_channels // self.n_substreams,
-            immutable=True)
-
-    def _send_metadata(self):
-        super(FXTelstateTransport, self)._send_metadata()
-        self._baseline_correlation_products_sensors()
-        self.sensor('sdp_cam2telstate_status', 'ready', immutable=False)
-
-
-class BeamformerTelstateTransport(CBFTelstateTransport):
-    def _tied_array_channelised_voltage_sensors(self):
-        pre = self._make_prefix(self.stream_name)
-        self.sensor(pre + 'n_chans', self.stream.n_channels, immutable=False)
-        self.sensor(pre + 'n_chans_per_substream', self.stream.n_channels // self.n_substreams,
-            immutable=True)
-        self.sensor(pre + 'spectra_per_heap', self.stream.timesteps)
-        for i in range(2 * self.stream.n_antennas):
-            self.sensor('{}input{}_weight'.format(pre, i), 1.0, immutable=False)
-
-    def _send_metadata(self):
-        super(BeamformerTelstateTransport, self)._send_metadata()
-        self._tied_array_channelised_voltage_sensors()
-        self.sensor('sdp_cam2telstate_status', 'ready', immutable=False)

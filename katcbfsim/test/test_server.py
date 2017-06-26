@@ -18,6 +18,12 @@ from katcbfsim import server, stream, transport
 from nose.tools import *
 
 
+M062_DESCRIPTION = 'm062, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -1440.69968823 -2269.26759132 6.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22'
+M063_DESCRIPTION = 'm063, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -3419.58251626 -1606.01510973 2.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22'
+# Modified version of m062, to test antenna replacement
+M062_ALT_DESCRIPTION = 'm062, -30:00:00.0, 21:26:38.0, 1035.0, 13.5, -1440.69968823 -2269.26759132 6.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22'
+
+
 def test_endpoints_to_str():
     endpoints = [
         Endpoint('hostname', 1234),
@@ -53,11 +59,11 @@ _current_transport = None
 class MockTransport(object):
     """Transport that throws away its data, for testing purposes."""
     @classmethod
-    def factory(cls, endpoints, interface, ibv, n_substreams, max_packet_size):
+    def factory(cls, endpoints, interface, ibv, max_packet_size):
         return transport.EndpointFactory(cls, endpoints, interface, ibv,
-                                         n_substreams, max_packet_size)
+                                         max_packet_size)
 
-    def __init__(self, endpoints, interface, ibv, n_substreams, max_packet_size, stream):
+    def __init__(self, endpoints, interface, ibv, max_packet_size, stream):
         global _current_transport
         self.endpoints = endpoints
         self.interface = interface
@@ -66,7 +72,6 @@ class MockTransport(object):
         self.dumps = 0
         self.dumps_semaphore = tornado.locks.Semaphore(0)
         self.closed = False
-        self.n_substreams = n_substreams
         _current_transport = self
 
     @trollius.coroutine
@@ -173,8 +178,8 @@ class TestSimulationServer(object):
         if clock_ratio is None:
             clock_ratio = 0.5    # Run faster than real-time
         yield self.make_request('clock-ratio', clock_ratio)
-        yield self.make_request('antenna-add', 'm062, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -1440.69968823 -2269.26759132 6.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22')
-        yield self.make_request('antenna-add', 'm063, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -3419.58251626 -1606.01510973 2.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22')
+        yield self.make_request('antenna-add', M062_DESCRIPTION)
+        yield self.make_request('antenna-add', M063_DESCRIPTION)
         # One source with a flux model, one without
         yield self.make_request('source-add', 'test1, radec, 3:30:00.00, -35:00:00.0, (500.0 2000.0 1.0)')
         yield self.make_request('source-add', 'test2, radec, 3:33:00.00, -35:01:00.0')
@@ -229,9 +234,6 @@ class TestSimulationServer(object):
         self._telstate.add.assert_any_call('cbf_int_time', n_accs * 2 * 4096 / 1712000000.0, immutable=True)
         self._telstate.add.assert_any_call('cbf_n_accs', n_accs, immutable=True)
         self._telstate.add.assert_any_call('cbf_n_chans_per_substream', 256, immutable=True)
-        # Use assert_called_with here rather than assert_any_call, to ensure
-        # that it is the *last* call.
-        self._telstate.add.assert_called_with('sdp_cam2telstate_status', 'ready', immutable=False)
 
     @cuda_test
     @async_test
@@ -254,8 +256,8 @@ class TestSimulationServer(object):
         yield self._configure_subarray()
         name = 'i0.tied-array-channelised-voltage.0x'
         uname = 'i0_tied_array_channelised_voltage_0x'
-        yield self.make_request('stream-create-beamformer', name, 1712000000, 1284000000, 856000000, 4096, 256, 8)
-        yield self.make_request('capture-destination', name, 'localhost:7149', 'lo', False, 4)
+        yield self.make_request('stream-create-beamformer', name, 1712000000, 1284000000, 856000000, 4096, 4, 256, 8)
+        yield self.make_request('capture-destination', name, 'localhost:7149', 'lo', False)
         yield self.make_request('capture-start', name)
         for i in range(min_dumps):
             yield _current_transport.dumps_semaphore.acquire()
@@ -264,7 +266,6 @@ class TestSimulationServer(object):
         assert_greater_equal(_current_transport.dumps, min_dumps)
         assert_true(_current_transport.closed)
         self._check_common_telstate()
-        print(self._telstate.add.mock_calls)
         self._telstate.add.assert_any_call('cbf_{}_n_chans'.format(uname), 4096, immutable=False)
         self._telstate.add.assert_any_call(
             'cbf_{}_n_chans_per_substream'.format(uname), 1024, immutable=True)
@@ -272,9 +273,6 @@ class TestSimulationServer(object):
         for i in range(4):   # input
             self._telstate.add.assert_any_call(
                 'cbf_{}_input{}_weight'.format(uname, i), 1.0, immutable=False)
-        # Use assert_called_with here rather than assert_any_call, to ensure
-        # that it is the *last* call.
-        self._telstate.add.assert_called_with('sdp_cam2telstate_status', 'ready', immutable=False)
 
     @async_test
     @tornado.gen.coroutine
@@ -306,15 +304,26 @@ class TestSimulationServer(object):
         a capture is in progress."""
         yield self._configure_subarray()
         # Use lower bandwidth to reduce test time
-        yield self.make_request('stream-create-beamformer', 'beam1', 1712000000, 1284000000, 856000000 / 4, 32768, 256, 8)
+        yield self.make_request('stream-create-beamformer', 'beam1', 1712000000, 1284000000, 856000000 / 4, 32768, 16, 256, 8)
         yield self.make_request('capture-destination', 'beam1', 'localhost:7149')
         yield self.make_request('capture-start', 'beam1')
-        yield self.assert_request_fails('^cannot add antennas while capture is in progress$', 'antenna-add', 'm062, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -1440.69968823 -2269.26759132 6.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22')
+        yield self.assert_request_fails('^cannot modify antennas while capture is in progress$', 'antenna-add', M062_DESCRIPTION)
         yield self.assert_request_fails('^cannot add source while capture is in progress$', 'source-add', 'test3, radec, 3:30:00.00, -35:00:00.0, (500.0 2000.0 1.0)')
-        yield self.assert_request_fails('^cannot set sync time while capture is in progress$', 'sync-time', 1446544133)
         yield self.assert_request_fails('^cannot set clock ratio while capture is in progress$', 'clock-ratio', 1.0)
         yield self.assert_request_fails('^cannot set center_frequency while capture is in progress', 'frequency-select', 'beam1', 10000000000)
         yield self.make_request('capture-stop', 'beam1')
+
+    @async_test
+    @tornado.gen.coroutine
+    def test_change_while_streams_exist(self):
+        """An appropriate error is returned when trying to change values while
+        a stream exists."""
+        yield self._configure_subarray()
+        yield self.make_request('stream-create-beamformer', 'beam1', 1712000000, 1284000000, 856000000, 32768, 16, 256, 8)
+        yield self.assert_request_fails('^cannot add new antennas after creating a stream$',
+            'antenna-add', 'm123, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -1440.69968823 -2269.26759132 6.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22')
+        yield self.assert_request_fails('^cannot set sync time after creating a stream$',
+            'sync-time', 1446544133)
 
     @tornado.gen.coroutine
     def _get_antenna_descriptions(self):
@@ -327,14 +336,41 @@ class TestSimulationServer(object):
         """Adding an antenna with a duplicate name replaces the existing one."""
         yield self._configure_subarray()
         antennas = yield self._get_antenna_descriptions()
-        assert_equal([
-            'm062, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -1440.69968823 -2269.26759132 6.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22',
-            'm063, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -3419.58251626 -1606.01510973 2.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22'],
-            antennas)
+        assert_equal([M062_DESCRIPTION, M063_DESCRIPTION], antennas)
         # Change the latitude, to check that the old value is replaced
-        yield self.make_request('antenna-add', 'm062, -30:00:00.0, 21:26:38.0, 1035.0, 13.5, -1440.69968823 -2269.26759132 6.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22')
+        yield self.make_request('antenna-add', M062_ALT_DESCRIPTION)
         antennas = yield self._get_antenna_descriptions()
-        assert_equal([
-            'm062, -30:00:00.0, 21:26:38.0, 1035.0, 13.5, -1440.69968823 -2269.26759132 6.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22',
-            'm063, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -3419.58251626 -1606.01510973 2.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22'],
-            antennas)
+        assert_equal([M062_ALT_DESCRIPTION, M063_DESCRIPTION], antennas)
+
+    @async_test
+    @tornado.gen.coroutine
+    def test_configure_subarray_from_telstate(self):
+        """Success case for configure-subarray-from-telstate request"""
+        # This is a somewhat fragile test because it doesn't fully
+        # simulate telstate, but the fakeredis telstate is a singleton
+        # and so leaks state across tests.
+        telstate = {
+            'config': {'antenna_mask': 'm062,m063'},
+            'm062_observer': M062_DESCRIPTION,
+            'm063_observer': M063_DESCRIPTION
+        }
+        telstate = katsdptelstate.TelescopeState()
+        telstate.add('config', {'antenna_mask': 'm062,m063'}, immutable=True)
+        telstate.add('m062_observer', M062_DESCRIPTION, immutable=True)
+        telstate.add('m063_observer', M063_DESCRIPTION, immutable=True)
+        self._server._telstate = telstate
+        yield self.make_request('configure-subarray-from-telstate')
+        antennas = yield self._get_antenna_descriptions()
+        assert_equal([M062_DESCRIPTION, M063_DESCRIPTION], antennas)
+
+    @async_test
+    @tornado.gen.coroutine
+    def test_configure_subarray_from_telstate_missing_antenna(self):
+        telstate = {
+            'config': {'antenna_mask': 'm062,m063'},
+            'm062_observer': M062_DESCRIPTION
+        }
+        self._server._telstate = telstate
+        yield self.assert_request_fails(
+            '^Antenna description for m063 not found$',
+            'configure-subarray-from-telstate')

@@ -69,6 +69,11 @@ class TelstateSubarray(Subarray):
 
 def prepare_server(server, args):
     """Do server configuration specified by command-line configuration"""
+    # Do the fake ones first, so that real values can replace them
+    if args.antenna_mask is not None:
+        for name in args.antenna_mask.split(','):
+            descr = name + ', 0:00:00.0, 00:00:00.0, 0.0, 0.0, , , 1.0'
+            server.add_antenna(katpoint.Antenna(descr))
     for antenna in args.cbf_antennas:
         server.add_antenna(katpoint.Antenna(antenna['description']))
     if args.cbf_antenna_file is not None:
@@ -91,10 +96,10 @@ def prepare_server(server, args):
         stream = server.add_fx_stream(
             args.create_fx_stream,
             args.cbf_adc_sample_rate, args.cbf_center_freq, args.cbf_bandwidth,
-            args.cbf_channels)
+            args.cbf_channels, args.cbf_substreams)
         server.set_accumulation_length(stream, args.cbf_int_time)
         server.set_destination(stream, args.cbf_spead, ifaddr, args.cbf_ibv,
-                               args.cbf_substreams, args.max_packet_size)
+                               args.max_packet_size)
         if args.dumps:
             server.set_n_dumps(stream, args.dumps)
         if args.start:
@@ -103,13 +108,20 @@ def prepare_server(server, args):
         stream = server.add_beamformer_stream(
             args.create_beamformer_stream,
             args.cbf_adc_sample_rate, args.cbf_center_freq, args.cbf_bandwidth,
-            args.cbf_channels, args.beamformer_timesteps, args.beamformer_bits)
+            args.cbf_channels, args.cbf_substreams,
+            args.beamformer_timesteps, args.beamformer_bits)
         server.set_destination(stream, args.cbf_spead, ifaddr, args.cbf_ibv,
-                               args.cbf_substreams, args.max_packet_size)
+                               args.max_packet_size)
         if args.dumps:
             server.set_n_dumps(stream, args.dumps)
         if args.start:
             server.capture_start(stream)
+    if args.telstate is not None and (args.create_beamformer_stream or args.create_fx_stream):
+        # Existing code may still depend on this. It's only done in the script
+        # rather than by the streams themselves, because if the katcp interface
+        # is used to add streams it's unknown how many streams the caller is
+        # adding and hence when the fake sensors are fully "ready".
+        args.telstate.add('sdp_cam2telstate_status', 'ready', immutable=False)
 
 
 def configure_logging(level):
@@ -137,6 +149,7 @@ def main():
     parser.add_argument('--cbf-substreams', type=int, metavar='N', help='Number of substreams (X/B-engines) in simulated CBF [auto]')
     parser.add_argument('--cbf-antenna', dest='cbf_antennas', type=parse_antenna, action='append', default=[], metavar='DESCRIPTION', help='Specify an antenna (can be used multiple times)')
     parser.add_argument('--cbf-antenna-file', metavar='FILE', help='Load antenna descriptions from file, one per line')
+    parser.add_argument('--cbf-antenna-names', dest='antenna_mask', metavar='NAME,...', help='Comma-separated list of antenna names to fake')
     parser.add_argument('--cbf-sim-source', dest='cbf_sim_sources', type=parse_source, action='append', default=[], metavar='DESCRIPTION', help='Specify a source object (can be used multiple times)')
     parser.add_argument('--cbf-sim-source-file', metavar='FILE', help='Load source descriptions from file, one per line')
     parser.add_argument('--cbf-sim-clock-ratio', type=float, default=1.0, metavar='RATIO', help='Ratio of real time to simulated time (<1 to run faster than real time, >1 for slower)')
