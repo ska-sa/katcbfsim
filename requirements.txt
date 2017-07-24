@@ -7,7 +7,8 @@ decorator
 enum34
 fakeredis
 funcsigs
-functools32==3.2.3-2
+functools32
+future
 futures
 h5py
 katcp
@@ -27,7 +28,6 @@ pandas
 pbr
 pkginfo
 ply
-ProxyTypes
 py
 pycuda
 pyephem
@@ -39,12 +39,11 @@ redis
 scipy
 singledispatch
 six
-spead2==1.1.0
+spead2
 tornado
 traceback2
 trollius
 unittest2
-zope.interface
 git+ssh://git@github.com/ska-sa/katpoint
 git+ssh://git@github.com/ska-sa/katsdptelstate
 git+ssh://git@github.com/ska-sa/katsdpservices
