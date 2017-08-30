@@ -194,7 +194,7 @@ class TestSimulationServer(object):
         self._telstate.add.assert_any_call('cbf_ticks_between_spectra', 8192, immutable=True)
         self._telstate.add.assert_any_call('cbf_n_chans', 4096, immutable=True)
         # Baseband frequency
-        self._telstate.add.assert_any_call('cbf_center_freq', 428000000.0, immutable=True)
+        self._telstate.add.assert_any_call('cbf_center_freq', 1284000000.0, immutable=True)
         for i in range(4):   # inputs
             self._telstate.add.assert_any_call('cbf_input{}_fft0_shift'.format(i), mock.ANY, immutable=False)
             self._telstate.add.assert_any_call('cbf_input{}_delay'.format(i), (0, 0, 0, 0, 0), immutable=False)

@@ -468,9 +468,7 @@ class CBFStream(Stream):
             self.sensor(telstate, input_pre + 'delay_ok', True, immutable=False)
             self.sensor(telstate, input_pre + 'eq', [200 + 0j], immutable=False)
             self.sensor(telstate, input_pre + 'fft0_shift', 32767, immutable=False)
-        # Need to report the baseband center frequency
-        center_frequency = self.center_frequency % self.bandwidth
-        self.sensor(telstate, pre + 'center_freq', float(center_frequency))
+        self.sensor(telstate, pre + 'center_freq', float(self.center_frequency))
         self.sensor(telstate, pre + 'n_chans', self.n_channels)
         self.sensor(telstate, pre + 'ticks_between_spectra',
                     self.n_channels * self.scale_factor_timestamp // self.bandwidth)
