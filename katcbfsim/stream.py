@@ -1,13 +1,19 @@
 from __future__ import print_function, division
-import trollius
 import logging
 import collections
+import math
+
+import numpy as np
+import scipy.interpolate
+
+import trollius
 from trollius import From, Return
+
+import katsdptelstate
 from katsdptelstate import endpoint
 from katsdpsigproc import accel, resource
 import katpoint
-import numpy as np
-import math
+
 from . import rime, source
 
 
@@ -573,6 +579,22 @@ class FXStream(CBFStream):
         self.subarray.ensure_source(self.subarray.sync_time)
         super(FXStream, self).capture_start()
 
+    def _bandpass(self):
+        """Create an approximate bandpass shape."""
+        rs = np.random.RandomState(seed=self.seed)
+        nx = 20
+        x = np.linspace(0.0, self.n_channels, nx)
+        # Set up a mostly flat bandpass with rolloff at the edges, in log-space.
+        y = np.zeros(nx)
+        y[-1] = y[0] = np.log10(0.1)    # 10 dB rolloff
+        y[:] += rs.normal(scale=0.01, size=y.shape)
+        f = scipy.interpolate.interp1d(x, y, kind='cubic', assume_sorted=True)
+        bp = f(np.arange(self.n_channels))
+        # Make every 700th channel a spike. If power-of-two blocks of channels
+        # get reordered, this should be very noticeable.
+        bp[::700] += np.linspace(0.5, 2.5, len(bp[::700]))
+        return np.exp(bp)
+
     def _make_predict(self):
         """Compiles the kernel, allocates memory etc. This is potentially slow,
         so it is run in a separate thread to avoid blocking the event loop.
@@ -599,8 +621,9 @@ class FXStream(CBFStream):
         predict.gain.fill(0)
         baseline_gain = self.subarray.gain * self.bandwidth / self.n_channels * self.accumulation_length / self.n_accs
         antenna_gain = math.sqrt(baseline_gain)
-        predict.gain[:, :, 0, 0].fill(antenna_gain)
-        predict.gain[:, :, 1, 1].fill(antenna_gain)
+        bandpass = self._bandpass() * antenna_gain
+        predict.gain[:, :, 0, 0] = bandpass[:, np.newaxis]
+        predict.gain[:, :, 1, 1] = bandpass[:, np.newaxis]
         data = [predict.buffer('out')]
         data.append(accel.DeviceArray(self.context, data[0].shape, data[0].dtype, data[0].padded_shape))
         host = [x.empty_like() for x in data]
