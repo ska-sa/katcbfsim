@@ -10,7 +10,6 @@ import trollius
 from trollius import From, Return
 
 import katsdptelstate
-from katsdptelstate import endpoint
 from katsdpsigproc import accel, resource
 import katpoint
 
@@ -359,7 +358,8 @@ class Stream(object):
             else:
                 logger.debug('Sleeping for %f seconds', wall_time - now)
                 self._last_warn_behind = 0
-            yield From(resource.wait_until(trollius.shield(self._stop_future), wall_time, self.loop))
+            yield From(resource.wait_until(trollius.shield(self._stop_future),
+                                           wall_time, self.loop))
         except trollius.TimeoutError:
             # This is the normal case: time for the next dump to be transmitted
             stopped = False
@@ -619,13 +619,15 @@ class FXStream(CBFStream):
         # Initialise gains. Eventually this will need to be more sophisticated, but
         # for now it is just real and diagonal.
         predict.gain.fill(0)
-        baseline_gain = self.subarray.gain * self.bandwidth / self.n_channels * self.accumulation_length / self.n_accs
+        baseline_gain = (self.subarray.gain * self.bandwidth / self.n_channels
+                         * self.accumulation_length / self.n_accs)
         antenna_gain = math.sqrt(baseline_gain)
         bandpass = self._bandpass() * antenna_gain
         predict.gain[:, :, 0, 0] = bandpass[:, np.newaxis]
         predict.gain[:, :, 1, 1] = bandpass[:, np.newaxis]
         data = [predict.buffer('out')]
-        data.append(accel.DeviceArray(self.context, data[0].shape, data[0].dtype, data[0].padded_shape))
+        data.append(accel.DeviceArray(self.context, data[0].shape, data[0].dtype,
+                                      data[0].padded_shape))
         host = [x.empty_like() for x in data]
         return predict, data, host
 
@@ -666,7 +668,7 @@ class FXStream(CBFStream):
                 logger.debug('Dump %d: operation enqueued, waiting for host memory', index)
 
                 # Transfer the data back to the host
-                yield From(io_queue_a.wait()) # Just to ensure ordering - no data hazards
+                yield From(io_queue_a.wait())   # Just to ensure ordering - no data hazards
                 yield From(host_a.wait())
                 io_queue.enqueue_wait_for_events([compute_event])
                 data.get_async(io_queue, host)
