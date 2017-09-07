@@ -586,7 +586,7 @@ class FXStream(CBFStream):
         x = np.linspace(0.0, self.n_channels, nx)
         # Set up a mostly flat bandpass with rolloff at the edges, in log-space.
         y = np.zeros(nx)
-        y[-1] = y[0] = np.log10(0.1)    # 10 dB rolloff
+        y[-1] = y[0] = np.log(0.1)    # 10 dB rolloff
         y[:] += rs.normal(scale=0.01, size=y.shape)
         f = scipy.interpolate.interp1d(x, y, kind='cubic', assume_sorted=True)
         bp = f(np.arange(self.n_channels))
