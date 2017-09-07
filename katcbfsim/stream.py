@@ -1,13 +1,18 @@
 from __future__ import print_function, division
-import trollius
 import logging
 import collections
+import math
+
+import numpy as np
+import scipy.interpolate
+
+import trollius
 from trollius import From, Return
-from katsdptelstate import endpoint
+
+import katsdptelstate
 from katsdpsigproc import accel, resource
 import katpoint
-import numpy as np
-import math
+
 from . import rime, source
 
 
@@ -353,7 +358,8 @@ class Stream(object):
             else:
                 logger.debug('Sleeping for %f seconds', wall_time - now)
                 self._last_warn_behind = 0
-            yield From(resource.wait_until(trollius.shield(self._stop_future), wall_time, self.loop))
+            yield From(resource.wait_until(trollius.shield(self._stop_future),
+                                           wall_time, self.loop))
         except trollius.TimeoutError:
             # This is the normal case: time for the next dump to be transmitted
             stopped = False
@@ -573,6 +579,22 @@ class FXStream(CBFStream):
         self.subarray.ensure_source(self.subarray.sync_time)
         super(FXStream, self).capture_start()
 
+    def _bandpass(self):
+        """Create an approximate bandpass shape."""
+        rs = np.random.RandomState(seed=self.seed)
+        nx = 20
+        x = np.linspace(0.0, self.n_channels, nx)
+        # Set up a mostly flat bandpass with rolloff at the edges, in log-space.
+        y = np.zeros(nx)
+        y[-1] = y[0] = np.log(0.1)    # 10 dB rolloff
+        y[:] += rs.normal(scale=0.01, size=y.shape)
+        f = scipy.interpolate.interp1d(x, y, kind='cubic', assume_sorted=True)
+        bp = f(np.arange(self.n_channels))
+        # Make every 700th channel a spike. If power-of-two blocks of channels
+        # get reordered, this should be very noticeable.
+        bp[::700] += np.linspace(0.5, 2.5, len(bp[::700]))
+        return np.exp(bp)
+
     def _make_predict(self):
         """Compiles the kernel, allocates memory etc. This is potentially slow,
         so it is run in a separate thread to avoid blocking the event loop.
@@ -597,12 +619,15 @@ class FXStream(CBFStream):
         # Initialise gains. Eventually this will need to be more sophisticated, but
         # for now it is just real and diagonal.
         predict.gain.fill(0)
-        baseline_gain = self.subarray.gain * self.bandwidth / self.n_channels * self.accumulation_length / self.n_accs
+        baseline_gain = (self.subarray.gain * self.bandwidth / self.n_channels
+                         * self.accumulation_length / self.n_accs)
         antenna_gain = math.sqrt(baseline_gain)
-        predict.gain[:, :, 0, 0].fill(antenna_gain)
-        predict.gain[:, :, 1, 1].fill(antenna_gain)
+        bandpass = self._bandpass() * antenna_gain
+        predict.gain[:, :, 0, 0] = bandpass[:, np.newaxis]
+        predict.gain[:, :, 1, 1] = bandpass[:, np.newaxis]
         data = [predict.buffer('out')]
-        data.append(accel.DeviceArray(self.context, data[0].shape, data[0].dtype, data[0].padded_shape))
+        data.append(accel.DeviceArray(self.context, data[0].shape, data[0].dtype,
+                                      data[0].padded_shape))
         host = [x.empty_like() for x in data]
         return predict, data, host
 
@@ -643,7 +668,7 @@ class FXStream(CBFStream):
                 logger.debug('Dump %d: operation enqueued, waiting for host memory', index)
 
                 # Transfer the data back to the host
-                yield From(io_queue_a.wait()) # Just to ensure ordering - no data hazards
+                yield From(io_queue_a.wait())   # Just to ensure ordering - no data hazards
                 yield From(host_a.wait())
                 io_queue.enqueue_wait_for_events([compute_event])
                 data.get_async(io_queue, host)
