@@ -589,10 +589,10 @@ class FXStream(CBFStream):
         y[-1] = y[0] = np.log(0.1)    # 10 dB rolloff
         y[:] += rs.normal(scale=0.01, size=y.shape)
         f = scipy.interpolate.interp1d(x, y, kind='cubic', assume_sorted=True)
-        bp = f(np.arange(self.n_channels))
+        bp = f(np.arange(self.n_channels) + 0.5)
         # Make every 700th channel a spike. If power-of-two blocks of channels
         # get reordered, this should be very noticeable.
-        bp[::700] += np.linspace(0.5, 2.5, len(bp[::700]))
+        bp[::700] += np.linspace(0.0, 2.5, len(bp[::700]))
         return np.exp(bp)
 
     def _make_predict(self):
