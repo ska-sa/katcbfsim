@@ -1,14 +1,13 @@
 from __future__ import print_function, division
 import logging
 import functools
-import ipaddress
 import trollius
 import katcp
 import katpoint
 import tornado
 from katcp import Sensor
 from katcp.kattypes import Str, Float, Int, Bool, request, return_reply
-from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
+from katsdptelstate.endpoint import Endpoint, endpoint_list_parser, endpoints_to_str
 import katsdpservices
 from katsdpservices.asyncio import to_tornado_future
 import katcbfsim
@@ -46,57 +45,6 @@ def _stream_exceptions(wrapped):
             return 'fail', str(e)
     functools.update_wrapper(wrapper, wrapped)
     return wrapper
-
-
-def endpoints_to_str(endpoints):
-    """Convert a list of endpoints into a compact string that generates the
-    same list. This is the inverse of
-    :func:`katsdptelstate.endpoint.endpoint_list_parser`.
-    """
-    # Partition the endpoints by type
-    ipv4 = []
-    ipv6 = []
-    other = []
-    for endpoint in endpoints:
-        # ipaddress module requires unicode, to convert if not already
-        host = endpoint.host.decode('utf-8') if isinstance(endpoint.host, bytes) else endpoint.host
-        try:
-            ipv4.append(Endpoint(ipaddress.IPv4Address(host), endpoint.port))
-        except ipaddress.AddressValueError:
-            try:
-                ipv6.append(Endpoint(ipaddress.IPv6Address(host), endpoint.port))
-            except ipaddress.AddressValueError:
-                other.append(endpoint)
-    # We build a list of parts, each of which is either host:port, addr:port or
-    # addr+n:port (where :port is omitted if None). These get comma-separated
-    # at the end.
-    parts = []
-    for ip in (ipv4, ipv6):
-        ip_parts = []    # lists of address, num, port (not tuples because mutated)
-        # Group endpoints with the same port together, then order by IP address
-        ip.sort(key=lambda endpoint: (endpoint.port is not None, endpoint.port, endpoint.host))
-        for endpoint in ip:
-            if (ip_parts and ip_parts[-1][2] == endpoint.port and
-                    ip_parts[-1][0] + ip_parts[-1][1] == endpoint.host):
-                ip_parts[-1][1] += 1
-            else:
-                ip_parts.append([endpoint.host, 1, endpoint.port])
-        for (address, num, port) in ip_parts:
-            if ip is ipv6:
-                s = '[' + address.compressed + ']'
-            else:
-                s = address.compressed
-            if num > 1:
-                s += '+{}'.format(num - 1)
-            if port is not None:
-                s += ':{}'.format(port)
-            parts.append(s)
-    for endpoint in other:
-        s = str(endpoint.host)
-        if endpoint.port is not None:
-            s += ':{}'.format(endpoint.port)
-        parts.append(s)
-    return ','.join(parts)
 
 
 class SimulatorServer(katcp.DeviceServer):

@@ -24,25 +24,6 @@ M063_DESCRIPTION = 'm063, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -3419.58251626 
 M062_ALT_DESCRIPTION = 'm062, -30:00:00.0, 21:26:38.0, 1035.0, 13.5, -1440.69968823 -2269.26759132 6.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22'
 
 
-def test_endpoints_to_str():
-    endpoints = [
-        Endpoint('hostname', 1234),
-        Endpoint('1.2.3.4', 7148),
-        Endpoint('1.2.3.3', 7148),
-        Endpoint('1.2.3.3', None),
-        Endpoint('1.2.3.3', 7149),
-        Endpoint('1.2.3.5', 7148),
-        Endpoint('192.168.1.255', None),
-        Endpoint('192.168.2.0', None),
-        Endpoint('::10ff', 7148),
-        Endpoint('::20ff', 7148),
-        Endpoint('::0000:2100', 7148),
-        Endpoint('hostname1', None)
-    ]
-    s = server.endpoints_to_str(endpoints)
-    assert_equal('1.2.3.3,192.168.1.255+1,1.2.3.3+2:7148,1.2.3.3:7149,[::10ff]:7148,[::20ff]+1:7148,hostname:1234,hostname1', s)
-
-
 @nottest
 def async_test(func):
     """Decorator to run a test inside the Tornado event loop"""
