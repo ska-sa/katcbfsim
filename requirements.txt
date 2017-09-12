@@ -13,7 +13,7 @@ futures
 h5py
 katcp
 katversion
-ipaddress==1.0.17
+ipaddress
 jsonschema==2.5.1
 linecache2
 llvmlite
