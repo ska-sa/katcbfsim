@@ -331,16 +331,11 @@ class TestSimulationServer(object):
         # simulate telstate, but the fakeredis telstate is a singleton
         # and so leaks state across tests.
         telstate = {
-            'config': {'antenna_mask': 'm062,m063'},
             'm062_observer': M062_DESCRIPTION,
             'm063_observer': M063_DESCRIPTION
         }
-        telstate = katsdptelstate.TelescopeState()
-        telstate.add('config', {'antenna_mask': 'm062,m063'}, immutable=True)
-        telstate.add('m062_observer', M062_DESCRIPTION, immutable=True)
-        telstate.add('m063_observer', M063_DESCRIPTION, immutable=True)
         self._server._telstate = telstate
-        yield self.make_request('configure-subarray-from-telstate')
+        yield self.make_request('configure-subarray-from-telstate', 'm062,m063')
         antennas = yield self._get_antenna_descriptions()
         assert_equal([M062_DESCRIPTION, M063_DESCRIPTION], antennas)
 
@@ -348,10 +343,9 @@ class TestSimulationServer(object):
     @tornado.gen.coroutine
     def test_configure_subarray_from_telstate_missing_antenna(self):
         telstate = {
-            'config': {'antenna_mask': 'm062,m063'},
             'm062_observer': M062_DESCRIPTION
         }
         self._server._telstate = telstate
         yield self.assert_request_fails(
             '^Antenna description for m063 not found$',
-            'configure-subarray-from-telstate')
+            'configure-subarray-from-telstate', 'm062,m063')

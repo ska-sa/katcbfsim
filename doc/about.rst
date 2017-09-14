@@ -173,6 +173,12 @@ a few key options are documented here.
 
    Load antenna descriptions from a file that contains one per line.
 
+.. option:: --cbf-antenna-mask <LIST>
+
+   Comma-separated list of antenna names. They will be given a fake position,
+   which can later be replaced using the
+   :samp:`configure-subarray-from-telstate` katcp request (see below).
+
 .. option:: --cbf-sim-source <DESCRIPTION>, --cbf-sim-source-file <FILENAME>
 
    These are similar, but for sources rather than antennas.
@@ -222,14 +228,12 @@ Mixed katcp and telstate
 ^^^^^^^^^^^^^^^^^^^^^^^^
 If the subarray static properties are not known at the time the simulator
 process is started, they can still be loaded from telstate later, using the
-:samp:`?configure-subarray-from-telstate` request. This takes no parameters,
-and requires that :option:`--telstate` was given on the command line.
+:samp:`?configure-subarray-from-telstate` request. This takes an optional
+parameter, which is a comma-separated list of antenna names, and requires that
+:option:`--telstate` was given on the command line. If no antenna names are
+listed, the names of the antennas configured at startup are used, replacing
+their positions (this is a good match for :opt:`--cbf-antenna-mask`).
 
-This loads additional configuration, which augments or overrides any specified
-in the :attr:`config` dictionary:
-
-- The list of antennas is obtained from
-  ``telstate['config']['antenna_mask']``, which must be a comma-separated list
-  (without whitespace). For an antenna named `name`, the attribute
-  :samp:`{name}_observer` is used to obtain the antenna. It can be specified as
-  either a description string or an antenna object.
+For each antenna named `name`, the attribute :samp:`{name}_observer` is used to
+obtain the antenna. It can be specified as either a description string or an
+antenna object.
