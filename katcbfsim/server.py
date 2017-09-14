@@ -381,11 +381,12 @@ class SimulatorServer(katcp.DeviceServer):
             sock.inform(source.description)
         return 'ok',
 
-    def configure_subarray_from_telstate(self, telstate=None):
+    def configure_subarray_from_telstate(self, antenna_names=None, telstate=None):
         """Configure subarray from sensors/attributes in telescope state."""
         if telstate is None:
             telstate = self._telstate
-        antenna_names = telstate['config']['antenna_mask'].split(',')
+        if antenna_names is None:
+            antenna_names = [antenna.name for antenna in self._subarray.antennas]
         for name in antenna_names:
             attribute_name = name + '_observer'
             try:
@@ -397,17 +398,19 @@ class SimulatorServer(katcp.DeviceServer):
                 # The constructor handles either case.
                 self.add_antenna(katpoint.Antenna(antenna))
 
-    @request()
+    @request(Str(optional=True))
     @return_reply()
     @_stream_exceptions
-    def request_configure_subarray_from_telstate(self, sock):
+    def request_configure_subarray_from_telstate(self, sock, antenna_names):
         """Configure the subarray using sensors and attributes in the telescope
         state. This uses dynamic values, rather than the :samp:`config`
         dictionary used by the command-line parser.
         """
         if self._telstate is None:
             return 'fail', 'no telescope state was specified with --telstate'
-        self.configure_subarray_from_telstate()
+        if antenna_names is not None:
+            antenna_names = antenna_names.split(',')
+        self.configure_subarray_from_telstate(antenna_names=antenna_names)
         return 'ok',
 
     @tornado.gen.coroutine
