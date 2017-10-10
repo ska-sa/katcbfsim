@@ -97,7 +97,7 @@ class SimulatorServer(katcp.DeviceServer):
             stream.set_telstate(self._telstate)
         self._streams[stream.name] = stream
         self._stream_sensors[stream] = {
-            'bandwidth': Sensor.integer(
+            'bandwidth': Sensor.float(
                 '{}.bandwidth'.format(stream.name),
                 'The bandwidth currently configured for the data stream',
                 'Hz', default=stream.bandwidth, initial_status=Sensor.NOMINAL),
@@ -105,7 +105,7 @@ class SimulatorServer(katcp.DeviceServer):
                 '{}.channels'.format(stream.name),
                 'The number of channels of the channelised data stream',
                 '', default=stream.n_channels, initial_status=Sensor.NOMINAL),
-            'centerfrequency': Sensor.integer(
+            'centerfrequency': Sensor.float(
                 '{}.centerfrequency'.format(stream.name),
                 'The center frequency for the data stream', 'Hz')
         }
@@ -122,7 +122,7 @@ class SimulatorServer(katcp.DeviceServer):
         self._add_stream(stream)
         return stream
 
-    @request(Str(), Int(), Int(), Int(), Int(), Int(optional=True))
+    @request(Str(), Float(), Float(), Float(), Int(), Int(optional=True))
     @return_reply()
     def request_stream_create_correlator(
             self, sock, name, adc_rate, center_frequency, bandwidth, n_channels, n_substreams=None):
@@ -132,11 +132,11 @@ class SimulatorServer(katcp.DeviceServer):
         ----------
         name : str
             Name for the new stream (must be unique)
-        adc_rate : int
+        adc_rate : float
             Simulated ADC clock rate, in Hz
-        center_frequency : int
+        center_frequency : float
             Sky frequency of the center of the band, in Hz
-        bandwidth : int
+        bandwidth : float
             Bandwidth of all channels in the stream, in Hz
         n_channels : int
             Number of channels in the stream
@@ -152,7 +152,7 @@ class SimulatorServer(katcp.DeviceServer):
         self.add_fx_stream(name, adc_rate, center_frequency, bandwidth, n_channels, n_substreams)
         return 'ok',
 
-    @request(Str(), Int(), Int(), Int(), Int(), Int(), Int(), Int())
+    @request(Str(), Float(), Float(), Float(), Int(), Int(), Int(), Int())
     @return_reply()
     def request_stream_create_beamformer(
             self, sock, name, adc_rate, center_frequency, bandwidth, n_channels,
@@ -231,7 +231,7 @@ class SimulatorServer(katcp.DeviceServer):
     def set_sync_time(self, timestamp):
         self._subarray.sync_time = katpoint.Timestamp(timestamp)
 
-    @request(Int())
+    @request(Float())
     @return_reply()
     @_stream_exceptions
     def request_sync_time(self, sock, timestamp):
@@ -305,7 +305,7 @@ class SimulatorServer(katcp.DeviceServer):
         # TODO: get the simulated timestamp from the stream
         self._stream_sensors[stream]['centerfrequency'].set_value(frequency)
 
-    @request(Str(), Int())
+    @request(Str(), Float())
     @return_reply()
     @_stream_exceptions
     @_stream_request

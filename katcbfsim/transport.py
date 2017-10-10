@@ -150,8 +150,8 @@ class FXSpeadTransport(CBFSpeadTransport):
         substream_channels = self.stream.n_channels // self.stream.n_substreams
         vis_view = vis.reshape(*shape)
         futures = []
-        timestamp = dump_index * self.stream.n_accs * self.stream.n_channels * \
-                self.stream.scale_factor_timestamp // self.stream.bandwidth
+        timestamp = int(dump_index * self.stream.n_accs * self.stream.n_channels
+                        * self.stream.scale_factor_timestamp / self.stream.bandwidth)
         # Truncate timestamp to the width of the field it is in
         timestamp = timestamp & ((1 << self._flavour.heap_address_bits) - 1)
         for i, substream in enumerate(self._substreams):
@@ -237,8 +237,8 @@ class BeamformerSpeadTransport(CBFSpeadTransport):
             self._last_metadata = index
             yield From(self.send_metadata())
         substream_channels = self.stream.n_channels // self.stream.n_substreams
-        timestamp = index * self.stream.timesteps * self.stream.n_channels * \
-                self.stream.scale_factor_timestamp // self.stream.bandwidth
+        timestamp = int(index * self.stream.timesteps * self.stream.n_channels * \
+                self.stream.scale_factor_timestamp / self.stream.bandwidth)
         # Truncate timestamp to the width of the field it is in
         timestamp = timestamp & ((1 << self._flavour.heap_address_bits) - 1)
         futures = []
