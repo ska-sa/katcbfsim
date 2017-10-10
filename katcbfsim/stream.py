@@ -77,8 +77,7 @@ class Subarray(object):
         Target. This determines the phase center for the simulation (and
         eventually the center for the beam model as well). Mutable.
     sync_time : :class:`katpoint.Timestamp`
-        Start time for the simulated capture. When set, it is truncated to a
-        whole number of seconds. Stream-immutable.
+        Start time for the simulated capture. Stream-immutable.
     gain : float
         Expected output visibility value, per Jansky per Hz per second.
         Capture-immutable.
@@ -167,7 +166,7 @@ class Subarray(object):
     def sync_time(self, value):
         if self.streams:
             raise CaptureInProgressError('cannot set sync time after creating a stream')
-        self._sync_time = katpoint.Timestamp(int(value.secs))
+        self._sync_time = katpoint.Timestamp(value.secs)
 
     @property
     def gain(self):
@@ -378,11 +377,11 @@ class CBFStream(Stream):
         Subarray corresponding to this stream
     name : str
         Name for this stream (used by katcp)
-    adc_rate : int
+    adc_rate : float
         Simulated ADC clock rate, in Hz
-    center_frequency : int
+    center_frequency : float
         Sky frequency of the center of the band, in Hz
-    bandwidth : int
+    bandwidth : float
         Bandwidth of all channels in the stream, in Hz
     n_channels : int
         Number of channels in the stream
@@ -394,11 +393,11 @@ class CBFStream(Stream):
 
     Attributes
     ----------
-    adc_rate : int
+    adc_rate : float
         Simulated ADC clock rate, in Hz
-    center_frequency : int
+    center_frequency : float
         Sky frequency of the center of the band, in Hz
-    bandwidth : int
+    bandwidth : float
         Bandwidth of all channels in the stream, in Hz
     n_channels : int
         Number of channels in the stream
@@ -406,7 +405,7 @@ class CBFStream(Stream):
         Number of substreams (X/B-engines)
     n_dumps : int
         If not ``None``, limits the number of dumps that will be done
-    scale_factor_timestamp : int
+    scale_factor_timestamp : float
         Number of timestamp increments per second
 
     Raises
@@ -459,9 +458,9 @@ class CBFStream(Stream):
     def _instrument_sensors(self, telstate):
         pre = self._make_prefix(None)   # instrument names not used yet
         # Only the sensors captured by cam2telstate are simulated
-        self.sensor(telstate, pre + 'adc_sample_rate', float(self.adc_rate))
-        self.sensor(telstate, pre + 'bandwidth', float(self.bandwidth))
-        self.sensor(telstate, pre + 'scale_factor_timestamp', float(self.scale_factor_timestamp))
+        self.sensor(telstate, pre + 'adc_sample_rate', self.adc_rate)
+        self.sensor(telstate, pre + 'bandwidth', self.bandwidth)
+        self.sensor(telstate, pre + 'scale_factor_timestamp', self.scale_factor_timestamp)
         self.sensor(telstate, pre + 'sync_time', self.subarray.sync_time.secs)
         self.sensor(telstate, pre + 'n_inputs', 2 * self.n_antennas)
 
@@ -477,7 +476,7 @@ class CBFStream(Stream):
         self.sensor(telstate, pre + 'center_freq', float(self.center_frequency))
         self.sensor(telstate, pre + 'n_chans', self.n_channels)
         self.sensor(telstate, pre + 'ticks_between_spectra',
-                    self.n_channels * self.scale_factor_timestamp // self.bandwidth)
+                    int(round(self.n_channels * self.scale_factor_timestamp / self.bandwidth)))
 
     def set_telstate(self, telstate):
         """Populate telstate with simulated sensors for the stream.
@@ -501,11 +500,11 @@ class FXStream(CBFStream):
         Subarray corresponding to this stream
     name : str
         Name for this stream (used by katcp)
-    adc_rate : int
+    adc_rate : float
         Simulated ADC clock rate, in Hz
-    center_frequency : int
+    center_frequency : float
         Sky frequency of the center of the band, in Hz
-    bandwidth : int
+    bandwidth : float
         Bandwidth of all channels in the stream, in Hz
     n_channels : int
         Number of channels in the stream
@@ -785,11 +784,11 @@ class BeamformerStream(CBFStream):
         Subarray corresponding to this stream
     name : str
         Name for this stream (used by katcp)
-    adc_rate : int
+    adc_rate : float
         Simulated ADC clock rate, in Hz
-    center_frequency : int
+    center_frequency : float
         Sky frequency of the center of the band, in Hz
-    bandwidth : int
+    bandwidth : float
         Bandwidth of all channels in the stream, in Hz
     n_channels : int
         Number of channels in the stream

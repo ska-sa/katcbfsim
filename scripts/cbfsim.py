@@ -138,13 +138,13 @@ def main():
     parser.add_argument('--start', action='store_true', help='Start the defined streams')
     parser.add_argument('--dumps', type=int, help='Set finite number of dumps to produce for pre-configured streams [infinite]')
     parser.add_argument('--cbf-channels', type=int, default=32768, metavar='N', help='Number of channels [%(default)s]')
-    parser.add_argument('--cbf-adc-sample-rate', type=int, default=1712000000, metavar='HZ', help='ADC rate [%(default)s]'),
-    parser.add_argument('--cbf-bandwidth', type=int, default=856000000, metavar='HZ', help='Bandwidth [%(default)s]')
-    parser.add_argument('--cbf-center-freq', type=int, default=1284000000, metavar='HZ', help='Sky center frequency [%(default)s]')
+    parser.add_argument('--cbf-adc-sample-rate', type=float, default=1712000000.0, metavar='HZ', help='ADC rate [%(default)s]'),
+    parser.add_argument('--cbf-bandwidth', type=float, default=856000000.0, metavar='HZ', help='Bandwidth [%(default)s]')
+    parser.add_argument('--cbf-center-freq', type=float, default=1284000000.0, metavar='HZ', help='Sky center frequency [%(default)s]')
     parser.add_argument('--cbf-spead', type=katsdptelstate.endpoint.endpoint_list_parser(7148), metavar='ENDPOINT', default='127.0.0.1:7148', help='destination for CBF output [%(default)s]')
     parser.add_argument('--cbf-interface', metavar='INTERFACE', help='Network interface on which to send data [auto]')
     parser.add_argument('--cbf-ibv', action='store_true', help='Use ibverbs for acceleration (requires --cbf-interface)')
-    parser.add_argument('--cbf-sync-time', type=int, metavar='TIME', help='Sync time as UNIX timestamp [now]')
+    parser.add_argument('--cbf-sync-time', type=float, metavar='TIME', help='Sync time as UNIX timestamp [now]')
     parser.add_argument('--cbf-int-time', type=float, metavar='TIME', default=0.5, help='Integration time in seconds [%(default)s]')
     parser.add_argument('--cbf-substreams', type=int, metavar='N', help='Number of substreams (X/B-engines) in simulated CBF [auto]')
     parser.add_argument('--cbf-antenna', dest='cbf_antennas', type=parse_antenna, action='append', default=[], metavar='DESCRIPTION', help='Specify an antenna (can be used multiple times)')
