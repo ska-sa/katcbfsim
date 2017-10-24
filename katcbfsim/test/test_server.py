@@ -90,6 +90,19 @@ class TestSimulationServer(object):
         self._patch('katcbfsim.transport.FXSpeadTransport', FXMockTransport)
         self._patch('katcbfsim.transport.BeamformerSpeadTransport', BeamformerMockTransport)
         self._telstate = mock.create_autospec(katsdptelstate.TelescopeState, instance=True)
+        # telstate.get is rigged to return certain known values.
+        # Note: this is fragile, and should maybe be replaced by the fakeredis
+        # telstate in future.
+        self._telstate_predefined = {
+            'cbf_i0_antenna_channelised_voltage_instrument_dev_name': 'i0'
+        }
+        for stream in ['i0_baseline_correlation_products',
+                       'i0_tied_array_channelised_voltage_0x',
+                       'i0_tied_array_channelised_voltage_0y']:
+            self._telstate_predefined['cbf_{}_src_streams'.format(stream)] = \
+                ['i0_antenna_channelised_voltage']
+        self._telstate.get.side_effect = self._telstate_predefined.get
+
         self._ioloop = AsyncIOMainLoop()
         self._ioloop.install()
         port = 7147
@@ -181,6 +194,9 @@ class TestSimulationServer(object):
             self._telstate.add.assert_any_call('cbf_input{}_delay'.format(i), (0, 0, 0, 0, 0), immutable=False)
             self._telstate.add.assert_any_call('cbf_input{}_delay_ok'.format(i), True, immutable=False)
             self._telstate.add.assert_any_call('cbf_input{}_eq'.format(i), [200 + 0j], immutable=False)
+        # Test a few with the instrument/stream name, to check that it works
+        self._telstate.add.assert_any_call('cbf_i0_bandwidth', 856000000.0, immutable=True)
+        self._telstate.add.assert_any_call('cbf_i0_antenna_channelised_voltage_ticks_between_spectra', 8192, immutable=True)
 
     @tornado.gen.coroutine
     def _test_fx_capture(self, clock_ratio=None, min_dumps=None):
@@ -188,15 +204,17 @@ class TestSimulationServer(object):
             min_dumps = 5    # Should be enough to demonstrate overlapping I/O
         yield self._configure_subarray()
         # Number of channels is kept small to avoid using too much memory
-        yield self.make_request('stream-create-correlator', 'cross', 1712000000, 1284000000, 856000000, 4096)
-        yield self.make_request('capture-destination', 'cross', 'localhost:7148')
-        yield self.make_request('accumulation-length', 'cross', 0.5)
-        yield self.make_request('frequency-select', 'cross', 1284000000)
-        yield self.make_request('capture-start', 'cross')
+        yield self.make_request('stream-create-correlator', 'i0.baseline-correlation-products',
+                                1712000000, 1284000000, 856000000, 4096)
+        yield self.make_request('capture-destination', 'i0.baseline-correlation-products',
+                                'localhost:7148')
+        yield self.make_request('accumulation-length', 'i0.baseline-correlation-products', 0.5)
+        yield self.make_request('frequency-select', 'i0.baseline-correlation-products', 1284000000)
+        yield self.make_request('capture-start', 'i0.baseline-correlation-products')
         # Wait until we've received the minimum number of dumps
         for i in range(min_dumps):
             yield _current_transport.dumps_semaphore.acquire()
-        yield self.make_request('capture-stop', 'cross')
+        yield self.make_request('capture-stop', 'i0.baseline-correlation-products')
         assert_is_not_none(_current_transport)
         assert_greater_equal(_current_transport.dumps, min_dumps)
         assert_true(_current_transport.closed)
