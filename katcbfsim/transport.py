@@ -247,6 +247,7 @@ class BeamformerSpeadTransport(CBFSpeadTransport):
             channel1 = channel0 + substream_channels
             self.ig_data[i]['bf_raw'].value = beam_data[channel0:channel1]
             self.ig_data[i]['timestamp'].value = timestamp
+            self.ig_data[i]['frequency'].value = channel0
             heap = self.ig_data[i].get_heap()
             futures.append(substream.async_send_heap(heap))
         yield From(trollius.gather(*futures, loop=self.stream.loop))
