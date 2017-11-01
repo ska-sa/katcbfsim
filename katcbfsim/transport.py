@@ -2,17 +2,19 @@
 
 from __future__ import print_function, division
 import logging
+import asyncio
+from collections import deque
+import concurrent.futures
+
 import netifaces
-import trollius
-from trollius import From
 import numpy as np
+import h5py
+
 import spead2
 import spead2.send
-import spead2.send.trollius
+import spead2.send.asyncio
+
 import katsdpservices
-import concurrent.futures
-import h5py
-from collections import deque
 
 
 logger = logging.getLogger(__name__)
@@ -65,23 +67,22 @@ class SpeadTransport(object):
                 kwargs['interface_address'] = ifaddr
                 kwargs['ttl'] = 1
             if ibv:
-                stream_cls = spead2.send.trollius.UdpIbvStream
+                stream_cls = spead2.send.asyncio.UdpIbvStream
             else:
-                stream_cls = spead2.send.trollius.UdpStream
+                stream_cls = spead2.send.asyncio.UdpStream
             self._substreams.append(stream_cls(
                 spead2.ThreadPool(), e.host, e.port, config, **kwargs))
             self._substreams[-1].set_cnt_sequence(i, stream.n_substreams)
 
-    @trollius.coroutine
-    def close(self):
+    async def close(self):
         # This is to ensure that the end packet won't be dropped for lack of
         # space in the sending buffer. In normal use it won't do anything
         # because we always asynchronously wait for transmission, but in an
         # exception case there might be pending sends.
         for i, substream in enumerate(self._substreams):
             heap = self.ig_data[i].get_end()
-            yield From(substream.async_flush())
-            yield From(substream.async_send_heap(heap))
+            await substream.async_flush()
+            await substream.async_send_heap(heap)
 
 
 class CBFSpeadTransport(SpeadTransport):
@@ -100,24 +101,22 @@ class CBFSpeadTransport(SpeadTransport):
             (), None, format=self._inline_format)
         return ig
 
-    @trollius.coroutine
-    def _send_metadata_endpoint(self, endpoint_idx):
+    async def _send_metadata_endpoint(self, endpoint_idx):
         """Reissue all the metadata on the stream (for one endpoint)."""
         substream_idx = endpoint_idx * self.stream.n_substreams // self.n_endpoints
         substream = self._substreams[substream_idx]
         heap = self.ig_data[substream_idx].get_heap(descriptors='all', data='none')
-        yield From(substream.async_send_heap(heap))
-        yield From(substream.async_send_heap(self.ig_data[endpoint_idx].get_start()))
+        await substream.async_send_heap(heap)
+        await substream.async_send_heap(self.ig_data[endpoint_idx].get_start())
 
-    @trollius.coroutine
-    def send_metadata(self):
+    async def send_metadata(self):
         """Reissue all the metadata on the stream."""
         futures = []
         # Send to all endpoints in parallel
         for i in range(self.n_endpoints):
-            futures.append(trollius.ensure_future(self._send_metadata_endpoint(i),
+            futures.append(asyncio.ensure_future(self._send_metadata_endpoint(i),
                                                   loop=self.stream.loop))
-        yield From(trollius.gather(*futures, loop=self.stream.loop))
+        await asyncio.gather(*futures, loop=self.stream.loop)
 
 
 class FXSpeadTransport(CBFSpeadTransport):
@@ -140,11 +139,10 @@ class FXSpeadTransport(CBFSpeadTransport):
             np.int32)
         return ig
 
-    @trollius.coroutine
-    def send(self, vis, dump_index):
+    async def send(self, vis, dump_index):
         if (dump_index - self._last_metadata) * self.stream.accumulation_length >= 5.0:
             self._last_metadata = dump_index
-            yield From(self.send_metadata())
+            await self.send_metadata()
         assert vis.flags.c_contiguous, 'Visibility array must be contiguous'
         shape = (self.stream.n_channels, self.stream.n_baselines * 4, 2)
         substream_channels = self.stream.n_channels // self.stream.n_substreams
@@ -161,9 +159,9 @@ class FXSpeadTransport(CBFSpeadTransport):
             self.ig_data[i]['timestamp'].value = timestamp
             self.ig_data[i]['frequency'].value = channel0
             heap = self.ig_data[i].get_heap()
-            futures.append(trollius.ensure_future(substream.async_send_heap(heap),
+            futures.append(asyncio.ensure_future(substream.async_send_heap(heap),
                                                   loop=self.stream.loop))
-        yield From(trollius.gather(*futures, loop=self.stream.loop))
+        await asyncio.gather(*futures, loop=self.stream.loop)
 
 
 class FileFactory(object):
@@ -185,8 +183,7 @@ class FileTransport(object):
         self._stream = stream
         self._file = h5py.File(filename, 'w')
 
-    @trollius.coroutine
-    def close(self):
+    async def close(self):
         self._file.close()
 
 
@@ -200,12 +197,10 @@ class FXFileTransport(FileTransport):
             maxshape=(None, stream.n_channels, stream.n_baselines * 4, 2))
         self._flags = None
 
-    @trollius.coroutine
-    def send_metadata(self):
+    async def send_metadata(self):
         pass
 
-    @trollius.coroutine
-    def send(self, vis, dump_index):
+    async def send(self, vis, dump_index):
         vis = vis.reshape((vis.shape[0], vis.shape[1] * 4, 2))
         self._dataset.resize(dump_index + 1, axis=0)
         self._dataset[dump_index : dump_index + 1, ...] = vis[np.newaxis, ...]
@@ -231,11 +226,10 @@ class BeamformerSpeadTransport(CBFSpeadTransport):
             dtype=self.stream.dtype)
         return ig
 
-    @trollius.coroutine
-    def send(self, beam_data, index):
+    async def send(self, beam_data, index):
         if (index - self._last_metadata) * self.stream.interval >= 5.0:
             self._last_metadata = index
-            yield From(self.send_metadata())
+            await self.send_metadata()
         substream_channels = self.stream.n_channels // self.stream.n_substreams
         timestamp = int(index * self.stream.timesteps * self.stream.n_channels * \
                 self.stream.scale_factor_timestamp / self.stream.bandwidth)
@@ -250,4 +244,4 @@ class BeamformerSpeadTransport(CBFSpeadTransport):
             self.ig_data[i]['frequency'].value = channel0
             heap = self.ig_data[i].get_heap()
             futures.append(substream.async_send_heap(heap))
-        yield From(trollius.gather(*futures, loop=self.stream.loop))
+        await asyncio.gather(*futures, loop=self.stream.loop)

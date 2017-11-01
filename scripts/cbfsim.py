@@ -1,29 +1,20 @@
 #!/usr/bin/env python
 
 from __future__ import print_function, division
-import trollius
-from trollius import From
-import tornado
-import tornado.gen
-from tornado.platform.asyncio import AsyncIOMainLoop, to_asyncio_future
+import asyncio
 import signal
 import argparse
 import logging
 import time
-import katcbfsim.server
-from katcbfsim.stream import Subarray
-from katcbfsim.source import Source
+
 from katsdpsigproc import accel
 import katsdptelstate
 import katsdpservices
 import katpoint
 
-
-@trollius.coroutine
-def on_shutdown(server):
-    print('Shutting down')
-    yield From(to_asyncio_future(server.stop()))
-    trollius.get_event_loop().stop()
+import katcbfsim.server
+from katcbfsim.stream import Subarray
+from katcbfsim.source import Source
 
 
 def parse_antenna(value):
@@ -130,6 +121,14 @@ def configure_logging(level):
         logging.root.setLevel(level.upper())
 
 
+async def run_server(server):
+    loop = asyncio.get_event_loop()
+    await server.start()
+    loop.add_signal_handler(signal.SIGINT, server.halt)
+    loop.add_signal_handler(signal.SIGTERM, server.halt)
+    await server.join()
+
+
 def main():
     parser = katsdpservices.ArgumentParser()
     group = parser.add_mutually_exclusive_group()
@@ -174,8 +173,6 @@ def main():
     except:
         logging.warn('Could not create a device context. FX simulation will not be possible')
         context = None
-    ioloop = AsyncIOMainLoop()
-    ioloop.install()
     if args.telstate is not None:
         subarray = TelstateSubarray(args.telstate)
     else:
@@ -183,14 +180,9 @@ def main():
     subarray.clock_ratio = args.cbf_sim_clock_ratio
     server = katcbfsim.server.SimulatorServer(context, subarray, telstate=args.telstate, host=args.host, port=args.port)
     prepare_server(server, args)
-    server.set_concurrency_options(thread_safe=False, handler_thread=False)
-    server.set_ioloop(ioloop)
-    trollius.get_event_loop().add_signal_handler(signal.SIGINT,
-        lambda: trollius.async(on_shutdown(server)))
-    trollius.get_event_loop().add_signal_handler(signal.SIGTERM,
-        lambda: trollius.async(on_shutdown(server)))
-    ioloop.add_callback(server.start)
-    trollius.get_event_loop().run_forever()
+    asyncio.get_event_loop().run_until_complete(run_server(server))
+    asyncio.get_event_loop().close()
+
 
 if __name__ == '__main__':
     main()
