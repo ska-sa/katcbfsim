@@ -1,6 +1,5 @@
 """Output stream abstraction"""
 
-from __future__ import print_function, division
 import logging
 import asyncio
 from collections import deque

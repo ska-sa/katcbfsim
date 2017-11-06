@@ -1,6 +1,5 @@
 """GPU implementation the Radio Interferometry Measurement Equation"""
 
-from __future__ import print_function, division
 import pkg_resources
 import numpy as np
 import numba

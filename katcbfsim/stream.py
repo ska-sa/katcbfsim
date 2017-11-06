@@ -1,4 +1,3 @@
-from __future__ import print_function, division
 import logging
 import collections
 import math
