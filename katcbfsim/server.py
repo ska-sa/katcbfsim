@@ -3,6 +3,7 @@ import logging
 import functools
 import enum
 import asyncio
+import inspect
 
 import aiokatcp
 from aiokatcp import FailReply, Sensor, Timestamp, RequestContext
@@ -33,12 +34,16 @@ def _stream_request(wrapped):
     exist.
     """
     @functools.wraps(wrapped)
-    def wrapper(self, sock, name, *args, **kwargs):
+    async def wrapper(self, ctx, name: str, *args, **kwargs):
         try:
             stream = self._streams[name]
         except KeyError as error:
             raise FailReply('requested stream name "{}" not found'.format(name)) from error
-        return wrapped(self, sock, stream, *args, **kwargs)
+        return (await wrapped(self, ctx, stream, *args, **kwargs))
+    sig = inspect.signature(wrapped)
+    parameters = list(sig.parameters.values())
+    parameters[2] = parameters[2].replace(annotation=str)
+    wrapper.__signature__ = sig.replace(parameters=parameters)
     return wrapper
 
 
@@ -46,12 +51,13 @@ def _stream_exceptions(wrapped):
     """Decorator used on requests that and turns exceptions defined in
     :py:mod:`stream` into katcp "fail" messages.
     """
-    def wrapper(*args, **kwargs):
+    @functools.wraps(wrapped)
+    async def wrapper(*args, **kwargs):
         try:
-            return wrapped(*args, **kwargs)
+            ret = await wrapped(*args, **kwargs)
+            return ret
         except StreamError as error:
             raise FailReply(str(error)) from error
-    functools.update_wrapper(wrapper, wrapped)
     return wrapper
 
 
