@@ -14,7 +14,7 @@ setup(
     scripts=['scripts/cbfsim.py'],
     setup_requires=['katversion'],
     install_requires=[
-        'aiokatcp', 'spead2>=1.4.0', 'katpoint', 'numpy', 'h5py',
+        'aiokatcp', 'spead2>=1.5.0', 'katpoint', 'numpy', 'h5py',
         'katsdpsigproc[CUDA]', 'katsdptelstate', 'jsonschema', 'netifaces', 'numba',
         'katsdpservices'],
     tests_require=tests_require,
