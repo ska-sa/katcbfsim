@@ -95,14 +95,14 @@ class TestSimulationServer(asynctest.TestCase):
 
         port = 7147
         self._server = server.SimulatorServer(
-            context, None, telstate=self._telstate, host='localhost', port=port, loop=self.loop)
+            context, None, telstate=self._telstate, host='127.0.0.1', port=port, loop=self.loop)
         return port
 
     async def setUp(self):
         port = self._sync_setup()
         await self._server.start()
         self.addCleanup(self._server.stop)
-        self._reader, self._writer = await asyncio.open_connection('localhost', port, loop=self.loop)
+        self._reader, self._writer = await asyncio.open_connection('127.0.0.1', port, loop=self.loop)
         self._mid = 1
 
     async def tearDown(self):
@@ -215,7 +215,7 @@ class TestSimulationServer(asynctest.TestCase):
         await self.make_request('stream-create-correlator', 'i0.baseline-correlation-products',
                                 1712000000, 1284000000, 856000000, 4096)
         await self.make_request('capture-destination', 'i0.baseline-correlation-products',
-                                'localhost:7148')
+                                '127.0.0.1:7148')
         await self.make_request('accumulation-length', 'i0.baseline-correlation-products', 0.5)
         await self.make_request('frequency-select', 'i0.baseline-correlation-products', 1284000000)
         await self.make_request('capture-start', 'i0.baseline-correlation-products')
@@ -259,7 +259,7 @@ class TestSimulationServer(asynctest.TestCase):
         name = 'i0.tied-array-channelised-voltage.0x'
         uname = 'i0_tied_array_channelised_voltage_0x'
         await self.make_request('stream-create-beamformer', name, 1712000000, 1284000000, 856000000, 4096, 4, 256, 8)
-        await self.make_request('capture-destination', name, 'localhost:7149', 'lo', False)
+        await self.make_request('capture-destination', name, '127.0.0.1:7149', 'lo', False)
         await self.make_request('capture-start', name)
         for i in range(min_dumps):
             await _current_transport.dumps_semaphore.acquire()
@@ -299,7 +299,7 @@ class TestSimulationServer(asynctest.TestCase):
         await self._configure_subarray()
         # Use lower bandwidth to reduce test time
         await self.make_request('stream-create-beamformer', 'beam1', 1712000000, 1284000000, 856000000 / 4, 32768, 16, 256, 8)
-        await self.make_request('capture-destination', 'beam1', 'localhost:7149')
+        await self.make_request('capture-destination', 'beam1', '127.0.0.1:7149')
         await self.make_request('capture-start', 'beam1')
         await self.assert_request_fails('^cannot modify antennas while capture is in progress$', 'antenna-add', M062_DESCRIPTION)
         await self.assert_request_fails('^cannot add source while capture is in progress$', 'source-add', 'test3, radec, 3:30:00.00, -35:00:00.0, (500.0 2000.0 1.0)')
