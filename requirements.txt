@@ -5,7 +5,7 @@ certifi
 Cython
 decorator
 enum34
-fakeredis
+fakenewsredis
 funcsigs
 functools32
 future
