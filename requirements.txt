@@ -1,6 +1,6 @@
 appdirs
 decorator
-fakeredis
+fakenewsredis
 future
 futures
 h5py
