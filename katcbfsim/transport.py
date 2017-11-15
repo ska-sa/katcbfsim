@@ -71,7 +71,7 @@ class SpeadTransport(object):
             kwargs = {}
             if ifaddr is not None:
                 kwargs['interface_address'] = ifaddr
-                kwargs['ttl'] = 1
+                kwargs['ttl'] = 4   # For MeerKAT layer 3 switching
             if ibv:
                 stream_cls = spead2.send.asyncio.UdpIbvStream
             else:
