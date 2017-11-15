@@ -2,7 +2,7 @@
 
 import logging
 import asyncio
-from collections import deque
+from collections import deque, namedtuple
 import concurrent.futures
 
 import netifaces
@@ -34,6 +34,9 @@ class EndpointFactory(object):
                         self.max_packet_size, stream)
 
 
+Substream = namedtuple('Substream', ['sender', 'endpoint', 'channel_range'])
+
+
 class SpeadTransport(object):
     """Base class for SPEAD streams, providing a factory function."""
     @classmethod
@@ -59,7 +62,11 @@ class SpeadTransport(object):
         out_rate = in_rate * 1.05 / stream.n_substreams
         config = spead2.send.StreamConfig(rate=out_rate, max_packet_size=max_packet_size)
         self._substreams = []
-        for i in range(stream.n_substreams):
+        server_id = stream.subarray.server_id
+        n_servers = stream.subarray.n_servers
+        first_substream = stream.n_substreams * server_id // n_servers
+        last_substream = stream.n_substreams * (server_id + 1) // n_servers
+        for i in range(first_substream, last_substream):
             e = endpoints[i * len(endpoints) // stream.n_substreams]
             kwargs = {}
             if ifaddr is not None:
@@ -69,19 +76,25 @@ class SpeadTransport(object):
                 stream_cls = spead2.send.asyncio.UdpIbvStream
             else:
                 stream_cls = spead2.send.asyncio.UdpStream
-            self._substreams.append(stream_cls(
-                spead2.ThreadPool(), e.host, e.port, config, **kwargs))
-            self._substreams[-1].set_cnt_sequence(i, stream.n_substreams)
+            sender = stream_cls(spead2.ThreadPool(), e.host, e.port, config, **kwargs)
+            channel0 = i * stream.n_channels // stream.n_substreams
+            channel1 = (i + 1) * stream.n_channels // stream.n_substreams
+            self._substreams.append(Substream(
+                sender=sender, endpoint=e, channel_range=slice(channel0, channel1)))
+            self._substreams[-1].sender.set_cnt_sequence(i, stream.n_substreams)
 
     async def close(self):
         # This is to ensure that the end packet won't be dropped for lack of
         # space in the sending buffer. In normal use it won't do anything
         # because we always asynchronously wait for transmission, but in an
         # exception case there might be pending sends.
-        for i, substream in enumerate(self._substreams):
-            heap = self.ig_data[i].get_end()
-            await substream.async_flush()
-            await substream.async_send_heap(heap)
+        prev_endpoint = None
+        for substream in self._substreams:
+            if substream.endpoint != prev_endpoint:
+                heap = self.ig_data.get_end()
+                await substream.sender.async_flush()
+                await substream.sender.async_send_heap(heap)
+                prev_endpoint = substream.endpoint
 
 
 class CBFSpeadTransport(SpeadTransport):
@@ -90,31 +103,32 @@ class CBFSpeadTransport(SpeadTransport):
     """
     def __init__(self, *args, **kwargs):
         super(CBFSpeadTransport, self).__init__(*args, **kwargs)
-        self.ig_data = [self.make_ig_data() for i in range(self.stream.n_substreams)]
-
-    def make_ig_data(self):
-        ig = spead2.send.ItemGroup(flavour=self._flavour)
-        ig.add_item(0x1600, 'timestamp', 'Timestamp of start of this integration. uint counting multiples of ADC samples since last sync (sync_time, id=0x1027). Divide this number by timestamp_scale (id=0x1046) to get back to seconds since last sync when this integration was actually started. Note that the receiver will need to figure out the centre timestamp of the accumulation (eg, by adding half of int_time, id 0x1016).',
+        self.ig_data = spead2.send.ItemGroup(flavour=self._flavour)
+        self.ig_data.add_item(
+            0x1600, 'timestamp', 'Timestamp of start of this integration. uint counting multiples of ADC samples since last sync (sync_time, id=0x1027). Divide this number by timestamp_scale (id=0x1046) to get back to seconds since last sync when this integration was actually started. Note that the receiver will need to figure out the centre timestamp of the accumulation (eg, by adding half of int_time, id 0x1016).',
             (), None, format=self._inline_format)
-        ig.add_item(0x4103, 'frequency', 'Identifies the first channel in the band of frequencies in the SPEAD heap. Can be used to reconstruct the full spectrum.',
+        self.ig_data.add_item(
+            0x4103, 'frequency', 'Identifies the first channel in the band of frequencies in the SPEAD heap. Can be used to reconstruct the full spectrum.',
             (), None, format=self._inline_format)
-        return ig
 
-    async def _send_metadata_endpoint(self, endpoint_idx):
+    async def _send_metadata_endpoint(self, sender, start):
         """Reissue all the metadata on the stream (for one endpoint)."""
-        substream_idx = endpoint_idx * self.stream.n_substreams // self.n_endpoints
-        substream = self._substreams[substream_idx]
-        heap = self.ig_data[substream_idx].get_heap(descriptors='all', data='none')
-        await substream.async_send_heap(heap)
-        await substream.async_send_heap(self.ig_data[endpoint_idx].get_start())
+        heap = self.ig_data.get_heap(descriptors='all', data='none')
+        await sender.async_send_heap(heap)
+        if start:
+            await sender.async_send_heap(self.ig_data.get_start())
 
-    async def send_metadata(self):
+    async def send_metadata(self, start=True):
         """Reissue all the metadata on the stream."""
         futures = []
         # Send to all endpoints in parallel
-        for i in range(self.n_endpoints):
-            futures.append(asyncio.ensure_future(self._send_metadata_endpoint(i),
-                                                  loop=self.stream.loop))
+        prev_endpoint = None
+        for substream in self._substreams:
+            if substream.endpoint != prev_endpoint:
+                futures.append(asyncio.ensure_future(
+                    self._send_metadata_endpoint(substream.sender, start=start),
+                    loop=self.stream.loop))
+                prev_endpoint = substream.endpoint
         await asyncio.gather(*futures, loop=self.stream.loop)
 
 
@@ -129,21 +143,18 @@ class FXSpeadTransport(CBFSpeadTransport):
         super(FXSpeadTransport, self).__init__(
             endpoints, ifaddr, ibv, max_packet_size, stream, in_rate)
         self._last_metadata = 0   # Dump index of last periodic metadata
-
-    def make_ig_data(self):
-        ig = super(FXSpeadTransport, self).make_ig_data()
         # flags_xeng_raw is still TBD in the ICD, so omitted for now
-        ig.add_item(0x1800, 'xeng_raw', 'Raw data stream from all the X-engines in the system. For KAT-7, this item represents a full spectrum (all frequency channels) assembled from lowest frequency to highest frequency. Each frequency channel contains the data for all baselines (n_bls given by SPEAD Id=0x1008). Each value is a complex number - two (real and imaginary) signed integers.',
+        self.ig_data.add_item(
+            0x1800, 'xeng_raw', 'Raw data stream from all the X-engines in the system. For KAT-7, this item represents a full spectrum (all frequency channels) assembled from lowest frequency to highest frequency. Each frequency channel contains the data for all baselines (n_bls given by SPEAD Id=0x1008). Each value is a complex number - two (real and imaginary) signed integers.',
             (self.stream.n_channels // self.stream.n_substreams, self.stream.n_baselines * 4, 2),
             np.int32)
-        return ig
 
     async def send(self, vis, dump_index):
         if (dump_index - self._last_metadata) * self.stream.accumulation_length >= 5.0:
             self._last_metadata = dump_index
-            await self.send_metadata()
+            await self.send_metadata(start=False)
         assert vis.flags.c_contiguous, 'Visibility array must be contiguous'
-        shape = (self.stream.n_channels, self.stream.n_baselines * 4, 2)
+        shape = (-1, self.stream.n_baselines * 4, 2)
         substream_channels = self.stream.n_channels // self.stream.n_substreams
         vis_view = vis.reshape(*shape)
         futures = []
@@ -151,14 +162,15 @@ class FXSpeadTransport(CBFSpeadTransport):
                         * self.stream.scale_factor_timestamp / self.stream.bandwidth)
         # Truncate timestamp to the width of the field it is in
         timestamp = timestamp & ((1 << self._flavour.heap_address_bits) - 1)
-        for i, substream in enumerate(self._substreams):
-            channel0 = substream_channels * i
-            channel1 = channel0 + substream_channels
-            self.ig_data[i]['xeng_raw'].value = vis_view[channel0:channel1]
-            self.ig_data[i]['timestamp'].value = timestamp
-            self.ig_data[i]['frequency'].value = channel0
-            heap = self.ig_data[i].get_heap()
-            futures.append(asyncio.ensure_future(substream.async_send_heap(heap),
+        offset = self._substreams[0].channel_range.start
+        for substream in self._substreams:
+            c0 = substream.channel_range.start - offset
+            c1 = substream.channel_range.stop - offset
+            self.ig_data['xeng_raw'].value = vis_view[c0:c1]
+            self.ig_data['timestamp'].value = timestamp
+            self.ig_data['frequency'].value = substream.channel_range.start
+            heap = self.ig_data.get_heap()
+            futures.append(asyncio.ensure_future(substream.sender.async_send_heap(heap),
                                                   loop=self.stream.loop))
         await asyncio.gather(*futures, loop=self.stream.loop)
 
@@ -191,8 +203,9 @@ class FXFileTransport(FileTransport):
     katdal-compatible."""
     def __init__(self, filename, stream):
         super(FXFileTransport, self).__init__(filename, stream)
+        n_channels = stream.n_channels // stream.subarray.n_servers
         self._dataset = self._file.create_dataset('correlator_data',
-            (0, stream.n_channels, stream.n_baselines * 4, 2), dtype=np.int32,
+            (0, n_channels, stream.n_baselines * 4, 2), dtype=np.int32,
             maxshape=(None, stream.n_channels, stream.n_baselines * 4, 2))
         self._flags = None
 
@@ -217,30 +230,28 @@ class BeamformerSpeadTransport(CBFSpeadTransport):
         super(BeamformerSpeadTransport, self).__init__(
             endpoints, ifaddr, ibv, max_packet_size, stream, in_rate)
         self._last_metadata = 0     # Dump index of last periodic metadata
-
-    def make_ig_data(self):
-        ig = super(BeamformerSpeadTransport, self).make_ig_data()
-        ig.add_item(0x5000, 'bf_raw', 'Beamformer output for frequency-domain beam. User-defined name (out of band control). Record length depending on number of frequency channels and F-X packet size (xeng_acc_len).',
+        self.ig_data.add_item(
+            0x5000, 'bf_raw', 'Beamformer output for frequency-domain beam. User-defined name (out of band control). Record length depending on number of frequency channels and F-X packet size (xeng_acc_len).',
             shape=(self.stream.n_channels // self.stream.n_substreams, self.stream.timesteps, 2),
             dtype=self.stream.dtype)
-        return ig
 
     async def send(self, beam_data, index):
         if (index - self._last_metadata) * self.stream.interval >= 5.0:
             self._last_metadata = index
-            await self.send_metadata()
+            await self.send_metadata(start=False)
         substream_channels = self.stream.n_channels // self.stream.n_substreams
         timestamp = int(index * self.stream.timesteps * self.stream.n_channels * \
                 self.stream.scale_factor_timestamp / self.stream.bandwidth)
         # Truncate timestamp to the width of the field it is in
         timestamp = timestamp & ((1 << self._flavour.heap_address_bits) - 1)
         futures = []
-        for i, substream in enumerate(self._substreams):
-            channel0 = substream_channels * i
-            channel1 = channel0 + substream_channels
-            self.ig_data[i]['bf_raw'].value = beam_data[channel0:channel1]
-            self.ig_data[i]['timestamp'].value = timestamp
-            self.ig_data[i]['frequency'].value = channel0
-            heap = self.ig_data[i].get_heap()
-            futures.append(substream.async_send_heap(heap))
+        offset = self._substreams[0].channel_range.start
+        for substream in self._substreams:
+            c0 = substream.channel_range.start - offset
+            c1 = substream.channel_range.stop - offset
+            self.ig_data['bf_raw'].value = beam_data[c0:c1]
+            self.ig_data['timestamp'].value = timestamp
+            self.ig_data['frequency'].value = substream.channel_range.start
+            heap = self.ig_data.get_heap()
+            futures.append(substream.sender.async_send_heap(heap))
         await asyncio.gather(*futures, loop=self.stream.loop)
