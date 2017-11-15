@@ -766,6 +766,14 @@ class FXStream(CBFStream):
         """Capture co-routine, started by :meth:`capture_start` and joined by
         :meth:`capture_stop`.
         """
+        logger.info('_capture started')
+        # Grab the start time here, rather than just before the loop. This is
+        # necessary when running a distributed simulation, because the
+        # initialisation takes a highly variable amount of time and can cause
+        # the separate simulators to desynchronise. We instead estimate a
+        # reasonable bound on the startup time and add that, so that we don't
+        # start out with a flurry of "falling behind" messages.
+        wall_time = self.loop.time() + 20
         # Futures corresponding to _run_dump coroutine calls
         dump_futures = collections.deque()
         transports = []
@@ -780,7 +788,13 @@ class FXStream(CBFStream):
             data_r = [resource.Resource(x, loop=self.loop) for x in data]
             host_r = [resource.Resource(x, loop=self.loop) for x in host]
             transports_r = resource.Resource(transports, loop=self.loop)
-            wall_time = self.loop.time()
+            if self.subarray.n_servers > 1:
+                logger.info('waiting for start time')
+                await self.wait_for_next(wall_time)
+            else:
+                # No need to wait, we don't have anyone to sync with
+                wall_time = self.loop.time()
+            logger.info('simulation starting')
             while self.n_dumps is None or index < self.n_dumps:
                 predict_a = predict_r.acquire()
                 data_a = data_r[index % len(data_r)].acquire()
