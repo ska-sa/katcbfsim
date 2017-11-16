@@ -1,6 +1,5 @@
 """Tests for :mod:`katcbfsim.rime`."""
 
-from __future__ import print_function, division
 from katsdpsigproc import accel
 from katsdpsigproc.test.test_accel import device_test, cuda_test, force_autotune
 from katcbfsim import rime

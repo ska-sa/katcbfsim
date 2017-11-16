@@ -1,17 +1,15 @@
-from __future__ import print_function, division
 import logging
 import collections
 import math
 import functools
+import asyncio
 
 import numpy as np
 import scipy.interpolate
 
-import trollius
-from trollius import From, Return
-
 import katsdptelstate
-from katsdpsigproc import accel, resource
+from katsdpsigproc import accel
+from katsdpsigproc.asyncio import resource
 import katpoint
 
 from . import rime, source
@@ -217,7 +215,7 @@ class Stream(object):
         Subarray corresponding to this stream
     name : str
         Name for this stream (used by katcp)
-    loop : :class:`trollius.BaseEventLoop`, optional
+    loop : :class:`asyncio.BaseEventLoop`, optional
         Event loop for coroutines
 
     Attributes
@@ -237,7 +235,7 @@ class Stream(object):
         Whether a capture is in progress. This is true from
         :meth:`capture_start` until :meth:`capture_stop` completes, even if
         the capture coroutine terminates earlier.
-    loop : :class:`trollius.BaseEventLoop`
+    loop : :class:`asyncio.BaseEventLoop`
         Event loop for coroutines
     """
     def __init__(self, subarray, name, loop=None):
@@ -247,7 +245,7 @@ class Stream(object):
         self.subarray = subarray
         self.transport_factories = []
         if loop is None:
-            self.loop = trollius.get_event_loop()
+            self.loop = asyncio.get_event_loop()
         else:
             self.loop = loop
         self._last_warn_behind = 0
@@ -277,7 +275,7 @@ class Stream(object):
 
     def capture_start(self):
         """Begin capturing data, if it has not been done already. The
-        capturing is done on the trollius event loop, which must thus be
+        capturing is done on the asyncio event loop, which must thus be
         allowed to run frequency to ensure timeous delivery of results.
 
         Subclasses may override this to provide consistency checks on the
@@ -295,12 +293,11 @@ class Stream(object):
             raise ConfigError('no destination specified')
         self.subarray.capturing += 1
         # Create a future that is set by capture_stop
-        self._stop_future = trollius.Future(loop=self.loop)
+        self._stop_future = asyncio.Future(loop=self.loop)
         # Start the capture coroutine on the event loop
-        self._capture_future = trollius.async(self._capture(), loop=self.loop)
+        self._capture_future = asyncio.ensure_future(self._capture(), loop=self.loop)
 
-    @trollius.coroutine
-    def capture_stop(self):
+    async def capture_stop(self):
         """Request an end to data capture, and wait for capture to complete.
         This is a coroutine.
         """
@@ -311,13 +308,12 @@ class Stream(object):
         # stops.
         if not self._stop_future.done():
             self._stop_future.set_result(None)
-        yield From(self._capture_future)
+        await self._capture_future
         self._stop_future = None
         self._capture_future = None
         self.subarray.capturing -= 1
 
-    @trollius.coroutine
-    def send_metadata(self):
+    async def send_metadata(self):
         """Send metadata on all transports.
 
         This instantiates temporary copies of the transports, which are
@@ -328,13 +324,12 @@ class Stream(object):
         try:
             transports = [factory(self) for factory in self.transport_factories]
             futures = [t.send_metadata() for t in transports]
-            yield From(trollius.gather(*futures, loop=self.loop))
+            await asyncio.gather(*futures, loop=self.loop)
         finally:
             for t in transports:
-                yield From(t.close())
+                await t.close()
 
-    @trollius.coroutine
-    def wait_for_next(self, wall_time):
+    async def wait_for_next(self, wall_time):
         """Utility function for subclasses to managing timing. It will wait
         until either `wall_time` is reached, or :meth:`capture_stop` has been
         called. It also warns if `wall_time` has already passed.
@@ -358,15 +353,14 @@ class Stream(object):
             else:
                 logger.debug('Sleeping for %f seconds', wall_time - now)
                 self._last_warn_behind = 0
-            yield From(resource.wait_until(trollius.shield(self._stop_future),
-                                           wall_time, self.loop))
-        except trollius.TimeoutError:
+            await resource.wait_until(asyncio.shield(self._stop_future), wall_time, self.loop)
+        except asyncio.TimeoutError:
             # This is the normal case: time for the next dump to be transmitted
             stopped = False
         else:
             # The _stop_future was triggered
             stopped = True
-        raise Return(stopped)
+        return stopped
 
 
 class CBFStream(Stream):
@@ -389,7 +383,7 @@ class CBFStream(Stream):
     n_substreams : int, optional
         Number of substreams (X/B-engines). If not specified, a default
         will be computed to match the MeerKAT CBF.
-    loop : :class:`trollius.BaseEventLoop`, optional
+    loop : :class:`asyncio.BaseEventLoop`, optional
         Event loop for coroutines
 
     Attributes
@@ -539,7 +533,7 @@ class FXStream(CBFStream):
         Number of channels in the stream
     n_substreams : int
         Number of substreams (X-engines)
-    loop : :class:`trollius.BaseEventLoop`, optional
+    loop : :class:`asyncio.BaseEventLoop`, optional
         Event loop for coroutines
 
     Attributes
@@ -659,8 +653,7 @@ class FXStream(CBFStream):
         host = [x.empty_like() for x in data]
         return predict, data, host
 
-    @trollius.coroutine
-    def _run_dump(self, index, predict_a, data_a, host_a, transports_a, io_queue_a):
+    async def _run_dump(self, index, predict_a, data_a, host_a, transports_a, io_queue_a):
         """Coroutine that does all the processing for a single dump. More than
         one of these will be active at a time, and they use
         :class:`katsdpsigproc.resource.Resource` to avoid data hazards and to
@@ -672,7 +665,7 @@ class FXStream(CBFStream):
                 # Prepare the predictor object.
                 # No need to wait for events on predict, because the object has its own
                 # command queue to serialise use.
-                yield From(predict_a.wait())
+                await predict_a.wait()
                 predict.bind(out=data)
                 dump_start_time = self.subarray.sync_time + index * self.accumulation_length
                 # Set the timestamp for the center of the integration period
@@ -683,7 +676,7 @@ class FXStream(CBFStream):
 
                 # Execute the predictor, updating data
                 logger.debug('Dump %d: waiting for device memory event', index)
-                events = yield From(data_a.wait())
+                events = await data_a.wait()
                 logger.debug('Dump %d: device memory wait event found', index)
                 predict.command_queue.enqueue_wait_for_events(events)
                 logger.debug('Dump %d: device memory wait queued', index)
@@ -696,8 +689,8 @@ class FXStream(CBFStream):
                 logger.debug('Dump %d: operation enqueued, waiting for host memory', index)
 
                 # Transfer the data back to the host
-                yield From(io_queue_a.wait())   # Just to ensure ordering - no data hazards
-                yield From(host_a.wait())
+                await io_queue_a.wait()   # Just to ensure ordering - no data hazards
+                await host_a.wait()
                 io_queue.enqueue_wait_for_events([compute_event])
                 data.get_async(io_queue, host)
                 io_queue.flush()
@@ -706,22 +699,21 @@ class FXStream(CBFStream):
                 data_a.ready([transfer_event])
                 io_queue_a.ready()
                 # Wait for the transfer to complete
-                yield From(resource.async_wait_for_events([transfer_event], loop=self.loop))
+                await resource.async_wait_for_events([transfer_event], loop=self.loop)
                 logger.debug('Dump %d: transfer to host complete, waiting for transport', index)
 
                 # Send the data
-                yield From(transports_a.wait())        # Just to ensure ordering
+                await transports_a.wait()        # Just to ensure ordering
                 logger.debug('Dump %d: starting transmission', index)
                 for transport in transports:
-                    yield From(transport.send(host, index))
+                    await transport.send(host, index)
                 host_a.ready()
                 transports_a.ready()
                 logger.debug('Dump %d: complete', index)
         except Exception:
             logging.error('Dump %d: exception', index, exc_info=True)
 
-    @trollius.coroutine
-    def _capture(self):
+    async def _capture(self):
         """Capture co-routine, started by :meth:`capture_start` and joined by
         :meth:`capture_stop`.
         """
@@ -731,8 +723,8 @@ class FXStream(CBFStream):
         try:
             transports = [factory(self) for factory in self.transport_factories]
             for transport in transports:
-                yield From(transport.send_metadata())
-            predict, data, host = yield From(self.loop.run_in_executor(None, self._make_predict))
+                await transport.send_metadata()
+            predict, data, host = await self.loop.run_in_executor(None, self._make_predict)
             index = 0
             predict_r = resource.Resource(predict, loop=self.loop)
             io_queue_r = resource.Resource(self.context.create_command_queue(), loop=self.loop)
@@ -751,16 +743,15 @@ class FXStream(CBFStream):
                 # we will block here rather than building an ever-growing set
                 # of active coroutines.
                 logger.debug('Dump %d: waiting for predictor', index)
-                yield From(predict_a.wait_events())
+                await predict_a.wait_events()
                 logger.debug('Dump %d: predictor ready', index)
-                future = trollius.async(
-                    self._run_dump(index, predict_a, data_a, host_a, transports_a, io_queue_a),
-                    loop=self.loop)
+                future = self.loop.create_task(
+                    self._run_dump(index, predict_a, data_a, host_a, transports_a, io_queue_a))
                 dump_futures.append(future)
                 # Sleep until either it is time to make the next dump, or we are asked
                 # to stop.
                 wall_time += self.wall_accumulation_length
-                stopped = yield From(self.wait_for_next(wall_time))
+                stopped = await self.wait_for_next(wall_time)
                 if stopped:
                     break
                 # Reap any previously completed coroutines
@@ -770,18 +761,18 @@ class FXStream(CBFStream):
                 index += 1
             logging.info('Stop requested, waiting for in-flight dumps...')
             while dump_futures:
-                yield From(dump_futures[0])
+                await dump_futures[0]
                 dump_futures.popleft()
             logging.info('Capture stopped by request')
             for transport in transports:
-                yield From(transport.close())
+                await transport.close()
         except Exception:
             logger.error('Exception in capture coroutine', exc_info=True)
             for future in dump_futures:
                 if not future.done():
                     future.cancel()
             if transport is not None:
-                yield From(transport.close())
+                await transport.close()
 
     def _baseline_correlation_products_sensors(self, telstate):
         baselines = []
@@ -829,7 +820,7 @@ class BeamformerStream(CBFStream):
     sample_bits : int
         Number of bits per output sample (for each of real and imag). Currently
         this must be 8, 16 or 32.
-    loop : :class:`trollius.BaseEventLoop`, optional
+    loop : :class:`asyncio.BaseEventLoop`, optional
         Event loop for coroutines
 
     Attributes
@@ -871,8 +862,7 @@ class BeamformerStream(CBFStream):
     def wall_interval(self):
         return self.subarray.clock_ratio * self.interval
 
-    @trollius.coroutine
-    def _run_dump(self, transports, index):
+    async def _run_dump(self, transports, index):
         data = np.zeros((self.n_channels, self.timesteps, 2), self.dtype)
         # Stuff in some patterned values to help test decoding
         for i in range(self.timesteps):
@@ -880,10 +870,9 @@ class BeamformerStream(CBFStream):
             data[value % self.n_channels, value % self.timesteps, 0] = value & 0x7f
             data[value % self.n_channels, value % self.timesteps, 1] = (value >> 15) & 0x7f
         for transport in transports:
-            yield From(transport.send(data, index))
+            await transport.send(data, index)
 
-    @trollius.coroutine
-    def _capture(self):
+    async def _capture(self):
         """Capture co-routine, started by :meth:`capture_start` and joined by
         :meth:`capture_stop`.
         """
@@ -892,18 +881,18 @@ class BeamformerStream(CBFStream):
         try:
             transports = [factory(self) for factory in self.transport_factories]
             for transport in transports:
-                yield From(transport.send_metadata())
+                await transport.send_metadata()
             index = 0
             wall_time = self.loop.time()
             while self.n_dumps is None or index < self.n_dumps:
                 while len(dump_futures) > 3:
-                    yield From(dump_futures[0])
+                    await dump_futures[0]
                     dump_futures.popleft()
-                future = trollius.async(
+                future = asyncio.ensure_future(
                     self._run_dump(transports, index), loop=self.loop)
                 dump_futures.append(future)
                 wall_time += self.wall_interval
-                stopped = yield From(self.wait_for_next(wall_time))
+                stopped = await self.wait_for_next(wall_time)
                 if stopped:
                     break
                 # Reap any previously completed coroutines
@@ -913,16 +902,16 @@ class BeamformerStream(CBFStream):
                 index += 1
             logging.info('Stop requested, waiting for in-flight dumps...')
             while dump_futures:
-                yield From(dump_futures[0])
+                await dump_futures[0]
                 dump_futures.popleft()
             logging.info('Capture stopped by request')
             for transport in transports:
-                yield From(transport.close())
+                await transport.close()
         except Exception:
             logger.error('Exception in capture coroutine', exc_info=True)
             if transports is not None:
                 for transport in transports:
-                    yield From(transport.close())
+                    await transport.close()
 
     def _tied_array_channelised_voltage_sensors(self, telstate):
         sensor = functools.partial(self.sensor, telstate, self.name, include_unprefixed=False)

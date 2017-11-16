@@ -1,8 +1,8 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 from setuptools import setup, find_packages
 
-tests_require=['nose', 'scipy', 'mock']
+tests_require=['nose', 'scipy', 'mock', 'asynctest']
 
 setup(
     author='Bruce Merry',
@@ -14,7 +14,7 @@ setup(
     scripts=['scripts/cbfsim.py'],
     setup_requires=['katversion'],
     install_requires=[
-        'katcp>=0.6.0', 'trollius', 'tornado>=4.2', 'spead2>=1.1.0', 'katpoint', 'numpy', 'h5py',
+        'aiokatcp', 'spead2>=1.5.0', 'katpoint', 'numpy', 'h5py',
         'katsdpsigproc[CUDA]', 'katsdptelstate', 'jsonschema', 'netifaces', 'numba',
         'katsdpservices'],
     tests_require=tests_require,
