@@ -443,7 +443,7 @@ class CBFStream(Stream):
         if
         - there are no antennas defined
         - the number of channels is not divisible by the number of substreams
-        - the number of substream is not divisible by the number of servers
+        - the number of substreams is not divisible by the number of servers
     """
     def __init__(self, subarray, name, adc_rate, center_frequency, bandwidth,
                  n_channels, n_substreams=None, loop=None):
