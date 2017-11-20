@@ -142,7 +142,7 @@ class Rime(accel.Operation):
         # Note: min_frequency is the centre of the first bin, not the bottom
         # end.
         self.frequencies = np.arange(n_channels) * channel_width + min_frequency
-        logging.info("Frequencies %s", self.frequencies)
+        logging.debug("Frequencies %s", self.frequencies)
         inv_wavelength = self._inv_wavelength.empty_like()
         inv_wavelength[:] = (self.frequencies / katpoint.lightspeed).astype(np.float32)
         self._inv_wavelength.set(command_queue, inv_wavelength)

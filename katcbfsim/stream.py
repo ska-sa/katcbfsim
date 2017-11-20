@@ -85,6 +85,10 @@ class Subarray(object):
         time. Smaller values will run the simulation faster; setting it to 0
         will cause the simulation to run as fast as possible.
         Capture-immutable.
+    n_servers : int
+        Number of servers over which the simulation is split. Stream-immutable.
+    server_id : int
+        Number of this server amongst :attr:`n_servers` (0-based). Stream-immutable.
     """
     def __init__(self):
         self.antennas = []
@@ -96,6 +100,8 @@ class Subarray(object):
         self._clock_ratio = 1.0
         self.streams = 0       # Total number of streams created from this subarray
         self.capturing = 0     # Number of streams that are capturing
+        self._n_servers = 1
+        self._server_id = 0
 
     def add_antenna(self, antenna):
         """Add a new antenna to the simulation, or replace an existing one.
@@ -186,6 +192,32 @@ class Subarray(object):
         if self.capturing:
             raise CaptureInProgressError('cannot set clock ratio while capture is in progress')
         self._clock_ratio = value
+
+    @property
+    def n_servers(self):
+        return self._n_servers
+
+    @n_servers.setter
+    def n_servers(self, value):
+        if self.streams:
+            raise CaptureInProgressError('cannot set n_servers after creating a stream')
+        if value <= self.server_id:
+            raise ValueError('cannot set n_servers <= server_id')
+        self._n_servers = value
+
+    @property
+    def server_id(self):
+        return self._server_id
+
+    @server_id.setter
+    def server_id(self, value):
+        if self.streams:
+            raise CaptureInProgressError('cannot set n_servers after creating a stream')
+        if value < 0:
+            raise ValueError('cannot set server_id < 0')
+        if value >= self.n_servers:
+            raise ValueError('cannot set n_servers <= server_id')
+        self._server_id = value
 
     def target_at(self, timestamp):
         """Obtains the target at a given point in simulated time. In this base
@@ -400,13 +432,18 @@ class CBFStream(Stream):
         Number of substreams (X/B-engines)
     n_dumps : int
         If not ``None``, limits the number of dumps that will be done
+    channel_range : slice
+        Range out of n_channels for which this server is responsible
     scale_factor_timestamp : float
         Number of timestamp increments per second
 
     Raises
     ------
     ConfigError
-        if there are no antennas defined
+        if
+        - there are no antennas defined
+        - the number of channels is not divisible by the number of substreams
+        - the number of substreams is not divisible by the number of servers
     """
     def __init__(self, subarray, name, adc_rate, center_frequency, bandwidth,
                  n_channels, n_substreams=None, loop=None):
@@ -426,8 +463,13 @@ class CBFStream(Stream):
                 n_substreams *= 2
         if n_channels % n_substreams:
             raise ConfigError('Number of channels not divisible by number of substreams')
+        if n_substreams % subarray.n_servers:
+            raise ConfigError('Number of substreams not divisible by number of servers')
         self.n_substreams = n_substreams
         self.n_dumps = None
+        self.channel_range = slice(
+            subarray.server_id * n_channels // subarray.n_servers,
+            (subarray.server_id + 1) * n_channels // subarray.n_servers)
         # This is what real CBF uses, even though it wraps pretty quickly
         self.scale_factor_timestamp = adc_rate
 
@@ -615,7 +657,8 @@ class FXStream(CBFStream):
         # Make every 700th channel a spike. If power-of-two blocks of channels
         # get reordered, this should be very noticeable.
         bp[::700] += np.linspace(0.0, 2.5, len(bp[::700]))
-        return np.exp(bp)
+        bp = np.exp(bp)
+        return bp[self.channel_range]
 
     def _make_predict(self):
         """Compiles the kernel, allocates memory etc. This is potentially slow,
@@ -632,9 +675,15 @@ class FXStream(CBFStream):
         """
         queue = self.context.create_command_queue()
         template = rime.RimeTemplate(self.context, len(self.subarray.antennas))
+        my_n_channels = self.n_channels // self.subarray.n_servers
+        my_bandwidth = self.bandwidth / self.subarray.n_servers
+        my_mid_channel = (self.channel_range.start + self.channel_range.stop) / 2.0
+        mid_channel = self.n_channels / 2.0
+        my_center_frequency = self.center_frequency \
+            + (my_mid_channel - mid_channel) * self.bandwidth / self.n_channels
         predict = template.instantiate(
-            queue, self.center_frequency, self.bandwidth,
-            self.n_channels, self.n_accs,
+            queue, my_center_frequency, my_bandwidth,
+            my_n_channels, self.n_accs,
             self.subarray.sources, self.subarray.antennas,
             self.sefd, self.seed, async=True)
         predict.ensure_all_bound()
@@ -717,6 +766,14 @@ class FXStream(CBFStream):
         """Capture co-routine, started by :meth:`capture_start` and joined by
         :meth:`capture_stop`.
         """
+        logger.info('_capture started')
+        # Grab the start time here, rather than just before the loop. This is
+        # necessary when running a distributed simulation, because the
+        # initialisation takes a highly variable amount of time and can cause
+        # the separate simulators to desynchronise. We instead estimate a
+        # reasonable bound on the startup time and add that, so that we don't
+        # start out with a flurry of "falling behind" messages.
+        wall_time = self.loop.time() + 20
         # Futures corresponding to _run_dump coroutine calls
         dump_futures = collections.deque()
         transports = []
@@ -731,7 +788,13 @@ class FXStream(CBFStream):
             data_r = [resource.Resource(x, loop=self.loop) for x in data]
             host_r = [resource.Resource(x, loop=self.loop) for x in host]
             transports_r = resource.Resource(transports, loop=self.loop)
-            wall_time = self.loop.time()
+            if self.subarray.n_servers > 1:
+                logger.info('waiting for start time')
+                await self.wait_for_next(wall_time)
+            else:
+                # No need to wait, we don't have anyone to sync with
+                wall_time = self.loop.time()
+            logger.info('simulation starting')
             while self.n_dumps is None or index < self.n_dumps:
                 predict_a = predict_r.acquire()
                 data_a = data_r[index % len(data_r)].acquire()
@@ -863,12 +926,14 @@ class BeamformerStream(CBFStream):
         return self.subarray.clock_ratio * self.interval
 
     async def _run_dump(self, transports, index):
-        data = np.zeros((self.n_channels, self.timesteps, 2), self.dtype)
+        my_n_channels = self.n_channels // self.subarray.n_servers
+        data = np.zeros((my_n_channels,
+                         self.timesteps, 2), self.dtype)
         # Stuff in some patterned values to help test decoding
         for i in range(self.timesteps):
             value = index * self.timesteps + i
-            data[value % self.n_channels, value % self.timesteps, 0] = value & 0x7f
-            data[value % self.n_channels, value % self.timesteps, 1] = (value >> 15) & 0x7f
+            data[value % my_n_channels, value % self.timesteps, 0] = value & 0x7f
+            data[value % my_n_channels, value % self.timesteps, 1] = (value >> 15) & 0x7f
         for transport in transports:
             await transport.send(data, index)
 

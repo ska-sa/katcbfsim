@@ -156,6 +156,8 @@ def main():
     parser.add_argument('--beamformer-timesteps', metavar='TIMES', type=int, default=256, help='Spectra included in each beamformer heap [%(default)s]')
     parser.add_argument('--beamformer-bits', metavar='BITS', type=int, choices=[8, 16, 32], default=8, help='Bits per real value in beamformer data [%(default)s]')
     parser.add_argument('--max-packet-size', metavar='BYTES', type=int, default=4096, help='Maximum SPEAD packet size for streams defined on command line [%(default)s]')
+    parser.add_argument('--servers', metavar='N', type=int, default=1, help='Number of servers over which the simulation is split [%(default)s]')
+    parser.add_argument('--server-id', metavar='N', type=int, default=1, help='Index of this server amongst --servers (1-based) [%(default)s]')
     parser.add_argument('--port', '-p', type=int, default=7147, help='katcp host port [%(default)s]')
     parser.add_argument('--host', '-a', type=str, default='', help='katcp host address [all hosts]')
     parser.add_argument('--log-level', '-l', default='INFO', help='logging level [%(default)s]')
@@ -177,7 +179,8 @@ def main():
     else:
         subarray = Subarray()
     subarray.clock_ratio = args.cbf_sim_clock_ratio
-    server = katcbfsim.server.SimulatorServer(context, subarray, telstate=args.telstate, host=args.host, port=args.port)
+    server = katcbfsim.server.SimulatorServer(
+        context, subarray, telstate=args.telstate, host=args.host, port=args.port)
     prepare_server(server, args)
     asyncio.get_event_loop().run_until_complete(run_server(server))
     asyncio.get_event_loop().close()
