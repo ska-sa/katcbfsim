@@ -179,6 +179,8 @@ def main():
     else:
         subarray = Subarray()
     subarray.clock_ratio = args.cbf_sim_clock_ratio
+    subarray.n_servers = args.servers
+    subarray.server_id = args.server_id - 1
     server = katcbfsim.server.SimulatorServer(
         context, subarray, telstate=args.telstate, host=args.host, port=args.port)
     prepare_server(server, args)
