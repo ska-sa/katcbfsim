@@ -779,8 +779,6 @@ class FXStream(CBFStream):
         transports = []
         try:
             transports = [factory(self) for factory in self.transport_factories]
-            for transport in transports:
-                await transport.send_metadata()
             predict, data, host = await self.loop.run_in_executor(None, self._make_predict)
             index = 0
             predict_r = resource.Resource(predict, loop=self.loop)
@@ -795,6 +793,8 @@ class FXStream(CBFStream):
                 # No need to wait, we don't have anyone to sync with
                 wall_time = self.loop.time()
             logger.info('simulation starting')
+            for transport in transports:
+                await transport.send_metadata()
             while self.n_dumps is None or index < self.n_dumps:
                 predict_a = predict_r.acquire()
                 data_a = data_r[index % len(data_r)].acquire()
