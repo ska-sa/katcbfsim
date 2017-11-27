@@ -60,7 +60,7 @@ class SpeadTransport(object):
         self._inline_format = [('u', self._flavour.heap_address_bits)]
         # Send at a slightly higher rate, to account for overheads, and so
         # that if the sender sends a burst we can catch up with it.
-        out_rate = in_rate * 1.05 / stream.n_substreams
+        out_rate = in_rate * 1.1 / stream.n_substreams
         config = spead2.send.StreamConfig(rate=out_rate, max_packet_size=max_packet_size)
         self._substreams = []
         server_id = stream.subarray.server_id
