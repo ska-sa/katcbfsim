@@ -14,6 +14,7 @@ import katpoint
 import katcbfsim.server
 from katcbfsim.stream import Subarray
 from katcbfsim.source import Source
+from katcbfsim.transport import DEFAULT_MAX_PACKET_SIZE
 
 
 def parse_antenna(value):
@@ -155,7 +156,7 @@ def main():
     parser.add_argument('--cbf-target', metavar='DESCRIPTION', help='Set initial target')
     parser.add_argument('--beamformer-timesteps', metavar='TIMES', type=int, default=256, help='Spectra included in each beamformer heap [%(default)s]')
     parser.add_argument('--beamformer-bits', metavar='BITS', type=int, choices=[8, 16, 32], default=8, help='Bits per real value in beamformer data [%(default)s]')
-    parser.add_argument('--max-packet-size', metavar='BYTES', type=int, default=4096, help='Maximum SPEAD packet size for streams defined on command line [%(default)s]')
+    parser.add_argument('--max-packet-size', metavar='BYTES', type=int, default=DEFAULT_MAX_PACKET_SIZE, help='Maximum SPEAD packet size for streams defined on command line [%(default)s]')
     parser.add_argument('--servers', metavar='N', type=int, default=1, help='Number of servers over which the simulation is split [%(default)s]')
     parser.add_argument('--server-id', metavar='N', type=int, default=1, help='Index of this server amongst --servers (1-based) [%(default)s]')
     parser.add_argument('--port', '-p', type=int, default=7147, help='katcp host port [%(default)s]')

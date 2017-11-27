@@ -16,6 +16,7 @@ import spead2.send.asyncio
 import katsdpservices
 
 
+DEFAULT_MAX_PACKET_SIZE = 4096 + 40       # 40 bytes of SPEAD headers in every packet
 logger = logging.getLogger(__name__)
 
 
@@ -26,7 +27,7 @@ class EndpointFactory(object):
         self.ifaddr = ifaddr
         self.ibv = ibv
         if max_packet_size is None:
-            max_packet_size = 4096
+            max_packet_size = DEFAULT_MAX_PACKET_SIZE
         self.max_packet_size = max_packet_size
 
     def __call__(self, stream):
