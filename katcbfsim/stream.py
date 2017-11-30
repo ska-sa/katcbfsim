@@ -207,7 +207,7 @@ class Subarray(object):
 
         Parameters
         ----------
-        timestamp : float
+        timestamp : :class:`katpoint.Timestamp`
             Time at which to look up the target
         """
         if not self.sources:
@@ -279,6 +279,8 @@ class Stream(object):
         Whether a capture is in progress. This is true from
         :meth:`capture_start` until :meth:`capture_stop` completes, even if
         the capture coroutine terminates earlier.
+    start_time : :class:`katpoint.Timestamp`
+        Simulated time for the start of the capture.
     loop : :class:`asyncio.BaseEventLoop`
         Event loop for coroutines
     """
@@ -287,6 +289,7 @@ class Stream(object):
         self._stop_future = None
         self.name = name
         self.subarray = subarray
+        self.start_time = None
         self.transport_factories = []
         if loop is None:
             self.loop = asyncio.get_event_loop()
@@ -317,7 +320,7 @@ class Stream(object):
     def capturing(self):
         return self._capture_future is not None
 
-    def capture_start(self):
+    def capture_start(self, start_time):
         """Begin capturing data, if it has not been done already. The
         capturing is done on the asyncio event loop, which must thus be
         allowed to run frequency to ensure timeous delivery of results.
@@ -335,7 +338,10 @@ class Stream(object):
             return
         if not self.transport_factories:
             raise ConfigError('no destination specified')
+        if start_time < self.subarray.sync_time:
+            raise ConfigError('start time is before sync time')
         self.subarray.capturing += 1
+        self.start_time = start_time
         # Create a future that is set by capture_stop
         self._stop_future = asyncio.Future(loop=self.loop)
         # Start the capture coroutine on the event loop
@@ -355,6 +361,7 @@ class Stream(object):
         await self._capture_future
         self._stop_future = None
         self._capture_future = None
+        self.start_time = None
         self.subarray.capturing -= 1
 
     async def send_metadata(self):
@@ -448,6 +455,8 @@ class CBFStream(Stream):
         Range out of n_channels for which this server is responsible
     scale_factor_timestamp : float
         Number of timestamp increments per second
+    start_timestamp : int
+        Timestamp for start time, as a raw CBF timestamp
 
     Raises
     ------
@@ -484,6 +493,12 @@ class CBFStream(Stream):
             (subarray.server_id + 1) * n_channels // subarray.n_servers)
         # This is what real CBF uses, even though it wraps pretty quickly
         self.scale_factor_timestamp = adc_rate
+
+    @property
+    def start_timestamp(self):
+        if self.start_time is None:
+            return None
+        return int(round((self.start_time - self.subarray.sync_time) * self.scale_factor_timestamp))
 
     def sensor(self, telstate, stream, key, value, immutable=True, include_unprefixed=True):
         """Add an attribute or sensor to telescope state.
@@ -636,10 +651,15 @@ class FXStream(CBFStream):
     def n_accs(self):
         return self._n_accs
 
-    def capture_start(self):
+    def capture_start(self, start_time):
         """Begin capturing data, if it has not been done already.
 
         If no sources are defined, one is added at the phase center.
+
+        Parameters
+        ----------
+        start_time : :class:`katpoint.Timestamp`
+            Start time in simulated world
 
         Raises
         ------
@@ -650,10 +670,10 @@ class FXStream(CBFStream):
         """
         if not self.transport_factories:
             raise ConfigError('no destination specified')
-        if self.subarray.target_at(self.subarray.sync_time) is None:
+        if self.subarray.target_at(start_time) is None:
             raise ConfigError('no target set')
-        self.subarray.ensure_source(self.subarray.sync_time)
-        super(FXStream, self).capture_start()
+        self.subarray.ensure_source(start_time)
+        super(FXStream, self).capture_start(start_time)
 
     def _bandpass(self):
         """Create an approximate bandpass shape."""
@@ -728,7 +748,7 @@ class FXStream(CBFStream):
                 # command queue to serialise use.
                 await predict_a.wait()
                 predict.bind(out=data)
-                dump_start_time = self.subarray.sync_time + index * self.accumulation_length
+                dump_start_time = self.start_time + index * self.accumulation_length
                 # Set the timestamp for the center of the integration period
                 dump_center_time = dump_start_time + 0.5 * self.accumulation_length
                 predict.set_time(dump_center_time)
