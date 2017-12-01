@@ -77,8 +77,11 @@ def prepare_server(server, args):
         with open(args.cbf_sim_source_file) as f:
             for line in f:
                 server.add_source(Source(line))
-    if args.cbf_sync_time is not None:
-        server.set_sync_time(args.cbf_sync_time)
+    if args.cbf_sync_time is None:
+        args.cbf_sync_time = time.time()
+    server.set_sync_time(args.cbf_sync_time)
+    if args.cbf_start_time is None:
+        args.cbf_start_time = args.cbf_sync_time
     server.set_gain(args.cbf_sim_gain)
     if args.cbf_target is not None:
         server.set_target(katpoint.Target(args.cbf_target))
@@ -94,7 +97,7 @@ def prepare_server(server, args):
         if args.dumps:
             server.set_n_dumps(stream, args.dumps)
         if args.start:
-            server.capture_start(stream)
+            server.capture_start(stream, katpoint.Timestamp(args.cbf_start_time))
     if args.create_beamformer_stream is not None:
         stream = server.add_beamformer_stream(
             args.create_beamformer_stream,
@@ -106,7 +109,7 @@ def prepare_server(server, args):
         if args.dumps:
             server.set_n_dumps(stream, args.dumps)
         if args.start:
-            server.capture_start(stream)
+            server.capture_start(stream, katpoint.Timestamp(args.cbf_start_time))
     if args.telstate is not None and (args.create_beamformer_stream or args.create_fx_stream):
         # Existing code may still depend on this. It's only done in the script
         # rather than by the streams themselves, because if the katcp interface
@@ -144,6 +147,7 @@ def main():
     parser.add_argument('--cbf-interface', metavar='INTERFACE', help='Network interface on which to send data [auto]')
     parser.add_argument('--cbf-ibv', action='store_true', help='Use ibverbs for acceleration (requires --cbf-interface)')
     parser.add_argument('--cbf-sync-time', type=float, metavar='TIME', help='Sync time as UNIX timestamp [now]')
+    parser.add_argument('--cbf-start-time', type=float, metavar='TIME', help='Start time of stream as UNIX timestamp [sync time]')
     parser.add_argument('--cbf-int-time', type=float, metavar='TIME', default=0.5, help='Integration time in seconds [%(default)s]')
     parser.add_argument('--cbf-substreams', type=int, metavar='N', help='Number of substreams (X/B-engines) in simulated CBF [auto]')
     parser.add_argument('--cbf-antenna', dest='cbf_antennas', type=parse_antenna, action='append', default=[], metavar='DESCRIPTION', help='Specify an antenna (can be used multiple times)')

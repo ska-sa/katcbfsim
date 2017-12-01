@@ -303,7 +303,7 @@ class TestSimulationServer(asynctest.TestCase):
         await self.make_request('capture-start', 'beam1')
         await self.assert_request_fails('^cannot modify antennas while capture is in progress$', 'antenna-add', M062_DESCRIPTION)
         await self.assert_request_fails('^cannot add source while capture is in progress$', 'source-add', 'test3, radec, 3:30:00.00, -35:00:00.0, (500.0 2000.0 1.0)')
-        await self.assert_request_fails('^cannot set clock ratio while capture is in progress$', 'clock-ratio', 1.0)
+        await self.assert_request_fails('^cannot set clock_ratio while capture is in progress$', 'clock-ratio', 1.0)
         await self.assert_request_fails('^cannot set center_frequency while capture is in progress', 'frequency-select', 'beam1', 10000000000)
         await self.make_request('capture-stop', 'beam1')
 
@@ -314,7 +314,7 @@ class TestSimulationServer(asynctest.TestCase):
         await self.make_request('stream-create-beamformer', 'beam1', 1712000000, 1284000000, 856000000, 32768, 16, 256, 8)
         await self.assert_request_fails('^cannot add new antennas after creating a stream$',
             'antenna-add', 'm123, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -1440.69968823 -2269.26759132 6.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22')
-        await self.assert_request_fails('^cannot set sync time after creating a stream$',
+        await self.assert_request_fails('^cannot set sync_time after creating a stream$',
             'sync-time', 1446544133)
 
     async def _get_antenna_descriptions(self):
