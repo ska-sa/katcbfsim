@@ -93,7 +93,7 @@ class Subarray(object):
     def __init__(self):
         self.antennas = []
         self.sources = []
-        self.target = None
+        self.target = katpoint.Target('Zenith, azel, 0:00:00.0, 90:00:00.0')
         self.position = None
         self._sync_time = katpoint.Timestamp()
         self._gain = 1e-4
@@ -228,8 +228,8 @@ class Subarray(object):
     def position_at(self, timestamp):
         """Obtains the position (pointing direction) at a given point in
         simulated time. In this base class this just returns :attr:`position`,
-        but it can be overridden by subclasses to allow the target to be pulled
-        rather than pushed."""
+        but it can be overridden by subclasses to allow the position to be
+        pulled rather than pushed."""
         return self.position
 
 
@@ -638,8 +638,6 @@ class FXStream(CBFStream):
         """
         if not self.transport_factories:
             raise ConfigError('no destination specified')
-        if self.subarray.target_at(self.subarray.sync_time) is None:
-            raise ConfigError('no target set')
         self.subarray.ensure_source(self.subarray.sync_time)
         super(FXStream, self).capture_start()
 
