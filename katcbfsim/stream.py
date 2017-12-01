@@ -323,7 +323,7 @@ class Stream(object):
     def capture_start(self, start_time):
         """Begin capturing data, if it has not been done already. The
         capturing is done on the asyncio event loop, which must thus be
-        allowed to run frequency to ensure timeous delivery of results.
+        allowed to run frequently to ensure timeous delivery of results.
 
         Subclasses may override this to provide consistency checks on the
         state. They must also provide the :meth:`_capture` coroutine.
