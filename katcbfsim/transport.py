@@ -161,6 +161,7 @@ class FXSpeadTransport(CBFSpeadTransport):
         futures = []
         timestamp = int(dump_index * self.stream.n_accs * self.stream.n_channels
                         * self.stream.scale_factor_timestamp / self.stream.bandwidth)
+        timestamp += self.stream.start_timestamp
         # Truncate timestamp to the width of the field it is in
         timestamp = timestamp & ((1 << self._flavour.heap_address_bits) - 1)
         offset = self._substreams[0].channel_range.start
@@ -243,6 +244,7 @@ class BeamformerSpeadTransport(CBFSpeadTransport):
         substream_channels = self.stream.n_channels // self.stream.n_substreams
         timestamp = int(index * self.stream.timesteps * self.stream.n_channels * \
                 self.stream.scale_factor_timestamp / self.stream.bandwidth)
+        timestamp += self.stream.start_timestamp
         # Truncate timestamp to the width of the field it is in
         timestamp = timestamp & ((1 << self._flavour.heap_address_bits) - 1)
         futures = []

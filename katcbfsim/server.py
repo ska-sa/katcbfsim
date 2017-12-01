@@ -3,6 +3,7 @@ import functools
 import enum
 import asyncio
 import inspect
+import time
 
 import aiokatcp
 from aiokatcp import FailReply, Sensor, Timestamp, RequestContext
@@ -393,16 +394,32 @@ class SimulatorServer(aiokatcp.DeviceServer):
             raise FailReply('cannot send metadata while halting')
         await stream.send_metadata()
 
-    def capture_start(self, stream):
-        stream.capture_start()
+    def capture_start(self, stream, start_time):
+        stream.capture_start(start_time)
 
     @_stream_exceptions
     @_stream_request
-    async def request_capture_start(self, ctx: RequestContext, stream: str) -> None:
-        """Start the flow of data for a stream"""
+    async def request_capture_start(self, ctx: RequestContext, stream: str,
+                                    start_time: aiokatcp.TimestampOrNow = None) -> None:
+        """Start the flow of data for a stream
+
+        Parameters
+        ----------
+        stream : string
+            Stream name
+        start_time : timestamp or ``now``, optional
+            If specified, it sets the simulation time at which the stream
+            starts. The default is the sync time.
+        """
         if self._halting:
             raise FailReply('cannot start capture while halting')
-        self.capture_start(stream)
+        if start_time is None:
+            start_time = stream.subarray.sync_time
+        elif start_time is aiokatcp.Now.NOW:
+            start_time = katpoint.Timestamp()
+        else:
+            start_time = katpoint.Timestamp(float(start_time))
+        self.capture_start(stream, start_time)
 
     @_stream_exceptions
     @_stream_request
