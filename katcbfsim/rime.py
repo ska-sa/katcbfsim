@@ -229,7 +229,9 @@ class Rime(accel.Operation):
         angles = np.empty((len(self.sources),), np.float64)
         # Find angles between sources and the pointing direction
         for i, source in enumerate(self.sources):
-            # Evaluate Airy beam model. It uses azel internally, so it needs an antenna.
+            # Evaluate Airy beam model. It uses azel internally, so it needs an
+            # antenna. cbfsim.py creates "position" from the az/el of antenna
+            # 0, so we do the same here.
             angles[i] = source.separation(position, timestamp=self.time, antenna=self.antennas[0])
             # There is a pole at 0, so adjust it away if it is zero
             if abs(angles[i]) < 1e-30:
