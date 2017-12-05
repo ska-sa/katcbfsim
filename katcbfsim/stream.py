@@ -266,6 +266,8 @@ class Stream(object):
     ----------
     name : :class:`str`
         Name for this stream (used by katcp)
+    name_norm : :class:`str`
+        Name with dashes and dots changed to underscores (used in telstate)
     subarray : :class:`Subarray`
         Subarray corresponding to this stream
     n_antennas : int, read-only
@@ -288,6 +290,7 @@ class Stream(object):
         self._capture_future = None
         self._stop_future = None
         self.name = name
+        self.name_norm = self.name.replace('-', '_').replace('.', '_')
         self.subarray = subarray
         self.start_time = None
         self.transport_factories = []
@@ -500,57 +503,45 @@ class CBFStream(Stream):
             return None
         return int(round((self.start_time - self.subarray.sync_time) * self.scale_factor_timestamp))
 
-    def sensor(self, telstate, stream, key, value, immutable=True, include_unprefixed=True):
+    def sensor(self, telstate, key, value, immutable=True):
         """Add an attribute or sensor to telescope state.
 
         Parameters
         ----------
         telstate : :class:`katsdptelstate.TelescopeState`
-            Telescope state
-        stream : str
-            Name of the CBF stream or instrument
+            Telescope state, scoped to the CBF stream/instrument
         key : str
-            Name of the sensor within the stream or instrument (without
-            ``cbf_`` prefix). It is underscore-normalised before being used to
-            form telstate keys.
+            Name of the sensor within the stream or instrument. It is
+            underscore-normalised before being used to form telstate keys.
         value : object
             Sensor/attribute value
         immutable : bool, optional
             Passed to :meth:`katsdptelstate.TelescopeState.add`
-        include_unprefixed : bool, optional
-            If true (default), create a second copy of the key without the
-            stream/instrument name.
         """
-        prefixes = ['cbf_' + stream.replace('.', '_').replace('-', '_') + '_']
-        if include_unprefixed:
-            prefixes.append('cbf_')
-        for prefix in prefixes:
-            full_key = prefix + key
-            try:
-                telstate.add(full_key, value, immutable=immutable)
-            except katsdptelstate.ImmutableKeyError:
-                logger.error('Could not set %s to %r because it already has a different value',
-                             full_key, value)
+        try:
+            telstate.add(key, value, immutable=immutable)
+        except katsdptelstate.ImmutableKeyError as error:
+            logger.error('%s', error)
 
-    def _instrument_sensors(self, telstate, instrument):
+    def _instrument_sensors(self, view):
         # Only the sensors captured by cam2telstate are simulated
-        self.sensor(telstate, instrument, 'adc_sample_rate', self.adc_rate)
-        self.sensor(telstate, instrument, 'bandwidth', self.bandwidth)
-        self.sensor(telstate, instrument, 'scale_factor_timestamp', self.scale_factor_timestamp)
-        self.sensor(telstate, instrument, 'sync_time', self.subarray.sync_time.secs)
-        self.sensor(telstate, instrument, 'n_inputs', 2 * self.n_antennas)
+        self.sensor(view, 'adc_sample_rate', self.adc_rate)
+        self.sensor(view, 'bandwidth', self.bandwidth)
+        self.sensor(view, 'scale_factor_timestamp', self.scale_factor_timestamp)
+        self.sensor(view, 'sync_time', self.subarray.sync_time.secs)
+        self.sensor(view, 'n_inputs', 2 * self.n_antennas)
 
-    def _antenna_channelised_voltage_sensors(self, telstate, name):
+    def _antenna_channelised_voltage_sensors(self, view):
         for i in range(2 * self.n_antennas):
             input_pre = 'input{}_'.format(i)
             # These are all arbitrary dummy values
-            self.sensor(telstate, name, input_pre + 'delay', (0, 0, 0, 0, 0), immutable=False)
-            self.sensor(telstate, name, input_pre + 'delay_ok', True, immutable=False)
-            self.sensor(telstate, name, input_pre + 'eq', [200 + 0j], immutable=False)
-            self.sensor(telstate, name, input_pre + 'fft0_shift', 32767, immutable=False)
-        self.sensor(telstate, name, 'center_freq', float(self.center_frequency))
-        self.sensor(telstate, name, 'n_chans', self.n_channels)
-        self.sensor(telstate, name, 'ticks_between_spectra',
+            self.sensor(view, input_pre + 'delay', (0, 0, 0, 0, 0), immutable=False)
+            self.sensor(view, input_pre + 'delay_ok', True, immutable=False)
+            self.sensor(view, input_pre + 'eq', [200 + 0j], immutable=False)
+            self.sensor(view, input_pre + 'fft0_shift', 32767, immutable=False)
+        self.sensor(view, 'center_freq', float(self.center_frequency))
+        self.sensor(view, 'n_chans', self.n_channels)
+        self.sensor(view, 'ticks_between_spectra',
                     int(round(self.n_channels * self.scale_factor_timestamp / self.bandwidth)))
 
     def set_telstate(self, telstate):
@@ -560,23 +551,24 @@ class CBFStream(Stream):
         """
         # Check if the upstreams have already been configured. If not, invent
         # names for them.
-        name_norm = self.name.replace('-', '_').replace('.', '_')
-        srcs = telstate.get('cbf_' + name_norm + '_src_streams')
+        stream_view = telstate.view(self.name_norm, exclusive=True)
+        srcs = stream_view.get('src_streams')
         if srcs is None:
-            src = 'katcbfsim_antenna_channelised_voltage_{}'.format(name_norm)
+            src = 'katcbfsim_antenna_channelised_voltage_{}'.format(self.name_norm)
             logger.warning('No src_streams found for %s, so defining stream %s',
-                           name_norm, src)
-            telstate.add('cbf_' + name_norm + '_src_streams', [src], immutable=True)
+                           self.name_norm, src)
+            stream_view.add('src_streams', [src], immutable=True)
         else:
             src = srcs[0]
-        instrument = telstate.get('cbf_' + src + '_instrument_dev_name')
+        src_view = telstate.view(src, exclusive=True)
+        instrument = src_view.get('instrument_dev_name')
         if instrument is None:
             instrument = 'katcbfsim_instrument_{}'.format(src)
             logger.warning('No instrument_dev_name found for %s, so defining %s',
                            src, instrument)
-            telstate.add('cbf_' + src + '_instrument_dev_name', instrument, immutable=True)
-        self._instrument_sensors(telstate, instrument)
-        self._antenna_channelised_voltage_sensors(telstate, src)
+            src_view.add('instrument_dev_name', instrument, immutable=True)
+        self._instrument_sensors(telstate.view(instrument, exclusive=True))
+        self._antenna_channelised_voltage_sensors(src_view)
 
 
 class FXStream(CBFStream):
@@ -867,7 +859,7 @@ class FXStream(CBFStream):
             if transport is not None:
                 await transport.close()
 
-    def _baseline_correlation_products_sensors(self, telstate):
+    def _baseline_correlation_products_sensors(self, view):
         baselines = []
         for i in range(self.n_antennas):
             for j in range(i, self.n_antennas):
@@ -876,15 +868,14 @@ class FXStream(CBFStream):
                         name1 = self.subarray.antennas[i].name + pol1
                         name2 = self.subarray.antennas[j].name + pol2
                         baselines.append((name1, name2))
-        self.sensor(telstate, self.name, 'bls_ordering', baselines)
-        self.sensor(telstate, self.name, 'int_time', self.accumulation_length)
-        self.sensor(telstate, self.name, 'n_accs', self.n_accs)
-        self.sensor(telstate, self.name, 'n_chans_per_substream',
-                    self.n_channels // self.n_substreams)
+        self.sensor(view, 'bls_ordering', baselines)
+        self.sensor(view, 'int_time', self.accumulation_length)
+        self.sensor(view, 'n_accs', self.n_accs)
+        self.sensor(view, 'n_chans_per_substream', self.n_channels // self.n_substreams)
 
     def set_telstate(self, telstate):
         super(FXStream, self).set_telstate(telstate)
-        self._baseline_correlation_products_sensors(telstate)
+        self._baseline_correlation_products_sensors(telstate.view(self.name_norm))
 
 
 class BeamformerStream(CBFStream):
@@ -1008,14 +999,13 @@ class BeamformerStream(CBFStream):
                 for transport in transports:
                     await transport.close()
 
-    def _tied_array_channelised_voltage_sensors(self, telstate):
-        sensor = functools.partial(self.sensor, telstate, self.name, include_unprefixed=False)
-        sensor('n_chans', self.n_channels, immutable=False)
-        sensor('n_chans_per_substream', self.n_channels // self.n_substreams)
-        sensor('spectra_per_heap', self.timesteps)
+    def _tied_array_channelised_voltage_sensors(self, view):
+        self.sensor(view, 'n_chans', self.n_channels, immutable=False)
+        self.sensor(view, 'n_chans_per_substream', self.n_channels // self.n_substreams)
+        self.sensor(view, 'spectra_per_heap', self.timesteps)
         for i in range(2 * self.n_antennas):
-            sensor('input{}_weight'.format(i), 1.0, immutable=False)
+            self.sensor(view, 'input{}_weight'.format(i), 1.0, immutable=False)
 
     def set_telstate(self, telstate):
         super(BeamformerStream, self).set_telstate(telstate)
-        self._tied_array_channelised_voltage_sensors(telstate)
+        self._tied_array_channelised_voltage_sensors(telstate.view(self.name_norm))
