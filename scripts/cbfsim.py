@@ -111,12 +111,6 @@ def prepare_server(server, args):
             server.set_n_dumps(stream, args.dumps)
         if args.start:
             server.capture_start(stream, katpoint.Timestamp(args.cbf_start_time))
-    if args.telstate is not None and (args.create_beamformer_stream or args.create_fx_stream):
-        # Existing code may still depend on this. It's only done in the script
-        # rather than by the streams themselves, because if the katcp interface
-        # is used to add streams it's unknown how many streams the caller is
-        # adding and hence when the fake sensors are fully "ready".
-        args.telstate.add('sdp_cam2telstate_status', 'ready', immutable=False)
 
 
 def configure_logging(level):

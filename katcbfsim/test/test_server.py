@@ -79,19 +79,18 @@ class TestSimulationServer(asynctest.TestCase):
         self._patchers = []
         self._patch('katcbfsim.transport.FXSpeadTransport', FXMockTransport)
         self._patch('katcbfsim.transport.BeamformerSpeadTransport', BeamformerMockTransport)
-        self._telstate = mock.create_autospec(katsdptelstate.TelescopeState, instance=True)
+        self._telstate = katsdptelstate.TelescopeState()
+        self._telstate.clear()
         # telstate.get is rigged to return certain known values.
         # Note: this is fragile, and should maybe be replaced by the fakeredis
         # telstate in future.
-        self._telstate_predefined = {
-            'cbf_i0_antenna_channelised_voltage_instrument_dev_name': 'i0'
-        }
+        self._telstate.add(
+            'i0_antenna_channelised_voltage_instrument_dev_name', 'i0', immutable=True)
         for stream in ['i0_baseline_correlation_products',
                        'i0_tied_array_channelised_voltage_0x',
                        'i0_tied_array_channelised_voltage_0y']:
-            self._telstate_predefined['cbf_{}_src_streams'.format(stream)] = \
-                ['i0_antenna_channelised_voltage']
-        self._telstate.get.side_effect = self._telstate_predefined.get
+            self._telstate.view(stream).add(
+                'src_streams', ['i0_antenna_channelised_voltage'], immutable=True)
 
         port = 7147
         self._server = server.SimulatorServer(
@@ -188,24 +187,31 @@ class TestSimulationServer(asynctest.TestCase):
         await self.make_request('source-add', 'test2, radec, 3:33:00.00, -35:01:00.0')
         await self.make_request('target', 'target, radec, 3:15:00.00, -36:00:00.0')
 
+    def _check_attribute(self, telstate, key, value):
+        assert_equal(telstate.get(key), value)
+        assert_true(telstate.is_immutable(key))
+
+    def _check_sensor(self, telstate, key, value):
+        assert_equal(telstate.get(key), value)
+        assert_false(telstate.is_immutable(key))
+
     def _check_common_telstate(self):
-        self._telstate.add.assert_any_call('cbf_adc_sample_rate', 1712000000.0, immutable=True)
-        self._telstate.add.assert_any_call('cbf_bandwidth', 856000000.0, immutable=True)
-        self._telstate.add.assert_any_call('cbf_n_inputs', 4, immutable=True)
-        self._telstate.add.assert_any_call('cbf_scale_factor_timestamp', 1712000000, immutable=True)
-        self._telstate.add.assert_any_call('cbf_sync_time', mock.ANY, immutable=True)
-        self._telstate.add.assert_any_call('cbf_ticks_between_spectra', 8192, immutable=True)
-        self._telstate.add.assert_any_call('cbf_n_chans', 4096, immutable=True)
-        # Baseband frequency
-        self._telstate.add.assert_any_call('cbf_center_freq', 1284000000.0, immutable=True)
+        instrument_view = self._telstate.view('i0', exclusive=True)
+        self._check_attribute(instrument_view, 'adc_sample_rate', 1712000000.0)
+        self._check_attribute(instrument_view, 'bandwidth', 856000000.0)
+        self._check_attribute(instrument_view, 'n_inputs', 4)
+        self._check_attribute(instrument_view, 'scale_factor_timestamp', 1712000000)
+        self._check_attribute(instrument_view, 'sync_time', mock.ANY)
+        acv_view = self._telstate.view('i0_antenna_channelised_voltage')
+        self._check_attribute(acv_view, 'ticks_between_spectra', 8192)
+        self._check_attribute(acv_view, 'n_chans', 4096)
+        self._check_attribute(acv_view, 'center_freq', 1284000000.0)
         for i in range(4):   # inputs
-            self._telstate.add.assert_any_call('cbf_input{}_fft0_shift'.format(i), mock.ANY, immutable=False)
-            self._telstate.add.assert_any_call('cbf_input{}_delay'.format(i), (0, 0, 0, 0, 0), immutable=False)
-            self._telstate.add.assert_any_call('cbf_input{}_delay_ok'.format(i), True, immutable=False)
-            self._telstate.add.assert_any_call('cbf_input{}_eq'.format(i), [200 + 0j], immutable=False)
-        # Test a few with the instrument/stream name, to check that it works
-        self._telstate.add.assert_any_call('cbf_i0_bandwidth', 856000000.0, immutable=True)
-        self._telstate.add.assert_any_call('cbf_i0_antenna_channelised_voltage_ticks_between_spectra', 8192, immutable=True)
+            input_view = self._telstate.view('i0_antenna_channelised_voltage_input{}'.format(i))
+            self._check_sensor(input_view, 'fft0_shift', mock.ANY)
+            self._check_sensor(input_view, 'delay', (0, 0, 0, 0, 0))
+            self._check_sensor(input_view, 'delay_ok', True)
+            self._check_sensor(input_view, 'eq', [200 + 0j])
 
     async def _test_fx_capture(self, clock_ratio=None, min_dumps=None):
         if min_dumps is None:
@@ -236,11 +242,12 @@ class TestSimulationServer(asynctest.TestCase):
                         bls_ordering.append((ap, bp))
         self._check_common_telstate()
         n_accs = 408 * 256   # Gives nearest to 0.5s
-        self._telstate.add.assert_any_call('cbf_bls_ordering', bls_ordering, immutable=True)
+        view = self._telstate.view('i0_baseline_correlation_products')
+        self._check_attribute(view, 'bls_ordering', bls_ordering)
         # 0.5 rounded to nearest acceptable interval
-        self._telstate.add.assert_any_call('cbf_int_time', n_accs * 2 * 4096 / 1712000000.0, immutable=True)
-        self._telstate.add.assert_any_call('cbf_n_accs', n_accs, immutable=True)
-        self._telstate.add.assert_any_call('cbf_n_chans_per_substream', 256, immutable=True)
+        self._check_attribute(view, 'int_time', n_accs * 2 * 4096 / 1712000000.0)
+        self._check_attribute(view, 'n_accs', n_accs)
+        self._check_attribute(view, 'n_chans_per_substream', 256)
 
     @cuda_test
     async def test_fx_capture(self):
@@ -268,13 +275,12 @@ class TestSimulationServer(asynctest.TestCase):
         assert_greater_equal(_current_transport.dumps, min_dumps)
         assert_true(_current_transport.closed)
         self._check_common_telstate()
-        self._telstate.add.assert_any_call('cbf_{}_n_chans'.format(uname), 4096, immutable=False)
-        self._telstate.add.assert_any_call(
-            'cbf_{}_n_chans_per_substream'.format(uname), 1024, immutable=True)
-        self._telstate.add.assert_any_call('cbf_{}_spectra_per_heap'.format(uname), 256, immutable=True)
+        view = self._telstate.view(uname)
+        self._check_sensor(view, 'n_chans', 4096)
+        self._check_attribute(view, 'n_chans_per_substream', 1024)
+        self._check_attribute(view, 'spectra_per_heap', 256)
         for i in range(4):   # input
-            self._telstate.add.assert_any_call(
-                'cbf_{}_input{}_weight'.format(uname, i), 1.0, immutable=False)
+            self._check_sensor(view, 'input{}_weight'.format(i), 1.0)
 
     async def test_beamformer_capture(self):
         """Create a beamformer target, start it, and stop it again"""
