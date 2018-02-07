@@ -61,17 +61,23 @@ class TelstateSubarray(Subarray):
 
 def prepare_server(server, args):
     """Do server configuration specified by command-line configuration"""
+    def add_antenna(descr, add_to_telstate=True):
+        antenna = katpoint.Antenna(descr)
+        server.add_antenna(antenna)
+        if add_to_telstate and args.telstate is not None:
+            args.telstate.add(antenna.name + '_observer', antenna.description, immutable=True)
+
     # Do the fake ones first, so that real values can replace them
     if args.antenna_mask is not None:
         for name in args.antenna_mask.split(','):
             descr = name + ', 0:00:00.0, 00:00:00.0, 0.0, 0.0, , , 1.0'
-            server.add_antenna(katpoint.Antenna(descr))
+            add_antenna(descr, False)
     for antenna in args.cbf_antennas:
-        server.add_antenna(katpoint.Antenna(antenna['description']))
+        add_antenna(antenna['description'])
     if args.cbf_antenna_file is not None:
         with open(args.cbf_antenna_file) as f:
             for line in f:
-                server.add_antenna(katpoint.Antenna(line))
+                add_antenna(line)
     for source in args.cbf_sim_sources:
         server.add_source(Source(source['description']))
     if args.cbf_sim_source_file is not None:

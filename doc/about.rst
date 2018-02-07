@@ -232,8 +232,12 @@ process is started, they can still be loaded from telstate later, using the
 parameter, which is a comma-separated list of antenna names, and requires that
 :option:`--telstate` was given on the command line. If no antenna names are
 listed, the names of the antennas configured at startup are used, replacing
-their positions (this is a good match for :opt:`--cbf-antenna-mask`).
+their positions (this is a good match for :opt:`--cbf-antenna-names`).
 
 For each antenna named `name`, the attribute :samp:`{name}_observer` is used to
 obtain the antenna. It can be specified as either a description string or an
 antenna object.
+
+This flow can also be used in the opposite direction: antennas configured on
+the command line with :opt:`--cbf-antenna` or :opt:`--cbf-antenna-file` are
+stored into telstate as :samp:`{name}_observer`.
