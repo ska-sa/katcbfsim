@@ -12,7 +12,7 @@ RUN install-requirements.py -d ~/docker-base/base-requirements.txt -d ~/docker-b
 # Install the package
 COPY . /tmp/install/katcbfsim
 WORKDIR /tmp/install/katcbfsim
-RUN python ./setup.py clean && pip install --no-index . && pip check
+RUN python ./setup.py clean && pip install --no-deps . && pip check
 # Sanity test
 RUN python -c 'import katcbfsim; print("Successful import")'
 
