@@ -3,7 +3,6 @@ import functools
 import enum
 import asyncio
 import inspect
-import time
 
 import aiokatcp
 from aiokatcp import FailReply, Sensor, Timestamp, RequestContext
@@ -110,18 +109,18 @@ class SimulatorServer(aiokatcp.DeviceServer):
             stream.set_telstate(self._telstate)
         self._streams[stream.name] = stream
         self._stream_sensors[stream] = {
-            'bandwidth': Sensor(float,
-                '{}.bandwidth'.format(stream.name),
+            'bandwidth': Sensor(
+                float, '{}.bandwidth'.format(stream.name),
                 'The bandwidth currently configured for the data stream',
                 'Hz', default=stream.bandwidth,
                 initial_status=Sensor.Status.NOMINAL),
-            'channels': Sensor(int,
-                '{}.channels'.format(stream.name),
+            'channels': Sensor(
+                int, '{}.channels'.format(stream.name),
                 'The number of channels of the channelised data stream',
                 '', default=stream.n_channels,
                 initial_status=Sensor.Status.NOMINAL),
-            'centerfrequency': Sensor(float,
-                '{}.centerfrequency'.format(stream.name),
+            'centerfrequency': Sensor(
+                float, '{}.centerfrequency'.format(stream.name),
                 'The center frequency for the data stream', 'Hz')
         }
         for sensor in self._stream_sensors[stream].values():
@@ -384,7 +383,7 @@ class SimulatorServer(aiokatcp.DeviceServer):
         self.configure_subarray_from_telstate(antenna_names=antenna_names)
 
     async def send_metadata(self, stream):
-        await trollius.ensure_future(stream.send_metadata(), loop=stream.loop)
+        await asyncio.ensure_future(stream.send_metadata(), loop=stream.loop)
 
     @_stream_exceptions
     @_stream_request

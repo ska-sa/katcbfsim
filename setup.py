@@ -2,7 +2,7 @@
 
 from setuptools import setup, find_packages
 
-tests_require=['nose', 'scipy', 'mock', 'asynctest']
+tests_require = ['nose', 'scipy', 'mock', 'asynctest']
 
 setup(
     author='Bruce Merry',

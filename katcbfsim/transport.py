@@ -2,18 +2,14 @@
 
 import logging
 import asyncio
-from collections import deque, namedtuple
-import concurrent.futures
+from collections import namedtuple
 
-import netifaces
 import numpy as np
 import h5py
 
 import spead2
 import spead2.send
 import spead2.send.asyncio
-
-import katsdpservices
 
 
 DEFAULT_MAX_PACKET_SIZE = 4096 + 40       # 40 bytes of SPEAD headers in every packet
@@ -106,10 +102,20 @@ class CBFSpeadTransport(SpeadTransport):
         super(CBFSpeadTransport, self).__init__(*args, **kwargs)
         self.ig_data = spead2.send.ItemGroup(flavour=self._flavour)
         self.ig_data.add_item(
-            0x1600, 'timestamp', 'Timestamp of start of this integration. uint counting multiples of ADC samples since last sync (sync_time, id=0x1027). Divide this number by timestamp_scale (id=0x1046) to get back to seconds since last sync when this integration was actually started. Note that the receiver will need to figure out the centre timestamp of the accumulation (eg, by adding half of int_time, id 0x1016).',
+            0x1600, 'timestamp',
+            'Timestamp of start of this integration. '
+            'uint counting multiples of ADC samples since last sync '
+            '(sync_time, id=0x1027). '
+            'Divide this number by timestamp_scale (id=0x1046) '
+            'to get back to seconds since last sync '
+            'when this integration was actually started. '
+            'Note that the receiver will need to figure out the centre timestamp '
+            'of the accumulation (eg, by adding half of int_time, id 0x1016).',
             (), None, format=self._inline_format)
         self.ig_data.add_item(
-            0x4103, 'frequency', 'Identifies the first channel in the band of frequencies in the SPEAD heap. Can be used to reconstruct the full spectrum.',
+            0x4103, 'frequency',
+            'Identifies the first channel in the band of frequencies in the SPEAD heap. '
+            'Can be used to reconstruct the full spectrum.',
             (), None, format=self._inline_format)
 
     async def _send_metadata_endpoint(self, sender, start):
@@ -146,7 +152,13 @@ class FXSpeadTransport(CBFSpeadTransport):
         self._last_metadata = 0   # Dump index of last periodic metadata
         # flags_xeng_raw is still TBD in the ICD, so omitted for now
         self.ig_data.add_item(
-            0x1800, 'xeng_raw', 'Raw data stream from all the X-engines in the system. For KAT-7, this item represents a full spectrum (all frequency channels) assembled from lowest frequency to highest frequency. Each frequency channel contains the data for all baselines (n_bls given by SPEAD Id=0x1008). Each value is a complex number - two (real and imaginary) signed integers.',
+            0x1800, 'xeng_raw',
+            'Raw data stream from all the X-engines in the system. '
+            'For KAT-7, this item represents a full spectrum '
+            '(all frequency channels) assembled from lowest frequency to highest frequency. '
+            'Each frequency channel contains the data for all baselines '
+            '(n_bls given by SPEAD Id=0x1008). '
+            'Each value is a complex number - two (real and imaginary) signed integers.',
             (self.stream.n_channels // self.stream.n_substreams, self.stream.n_baselines * 4, 2),
             np.int32)
 
@@ -156,7 +168,6 @@ class FXSpeadTransport(CBFSpeadTransport):
             await self.send_metadata(start=False)
         assert vis.flags.c_contiguous, 'Visibility array must be contiguous'
         shape = (-1, self.stream.n_baselines * 4, 2)
-        substream_channels = self.stream.n_channels // self.stream.n_substreams
         vis_view = vis.reshape(*shape)
         futures = []
         timestamp = int(dump_index * self.stream.n_accs * self.stream.n_channels
@@ -173,7 +184,7 @@ class FXSpeadTransport(CBFSpeadTransport):
             self.ig_data['frequency'].value = substream.channel_range.start
             heap = self.ig_data.get_heap()
             futures.append(asyncio.ensure_future(substream.sender.async_send_heap(heap),
-                                                  loop=self.stream.loop))
+                                                 loop=self.stream.loop))
         await asyncio.gather(*futures, loop=self.stream.loop)
 
 
@@ -183,7 +194,7 @@ class FileFactory(object):
         self.filename = filename
 
     def __call__(self, *args, **kwargs):
-        return self.cls(filename, *args, **kwargs)
+        return self.cls(self.filename, *args, **kwargs)
 
 
 class FileTransport(object):
@@ -206,7 +217,8 @@ class FXFileTransport(FileTransport):
     def __init__(self, filename, stream):
         super(FXFileTransport, self).__init__(filename, stream)
         n_channels = stream.n_channels // stream.subarray.n_servers
-        self._dataset = self._file.create_dataset('correlator_data',
+        self._dataset = self._file.create_dataset(
+            'correlator_data',
             (0, n_channels, stream.n_baselines * 4, 2), dtype=np.int32,
             maxshape=(None, stream.n_channels, stream.n_baselines * 4, 2))
         self._flags = None
@@ -228,12 +240,17 @@ class BeamformerSpeadTransport(CBFSpeadTransport):
         if stream.wall_interval == 0:
             in_rate = 0
         else:
-            in_rate = stream.n_channels * stream.timesteps * 2 * stream.sample_bits / stream.wall_interval / 8
+            in_rate = (stream.n_channels * stream.timesteps * 2 * stream.sample_bits
+                       / stream.wall_interval / 8)
         super(BeamformerSpeadTransport, self).__init__(
             endpoints, ifaddr, ibv, max_packet_size, stream, in_rate)
         self._last_metadata = 0     # Dump index of last periodic metadata
         self.ig_data.add_item(
-            0x5000, 'bf_raw', 'Beamformer output for frequency-domain beam. User-defined name (out of band control). Record length depending on number of frequency channels and F-X packet size (xeng_acc_len).',
+            0x5000, 'bf_raw',
+            'Beamformer output for frequency-domain beam. '
+            'User-defined name (out of band control). '
+            'Record length depending on number of frequency channels '
+            'and F-X packet size (xeng_acc_len).',
             shape=(self.stream.n_channels // self.stream.n_substreams, self.stream.timesteps, 2),
             dtype=self.stream.dtype)
 
@@ -241,9 +258,8 @@ class BeamformerSpeadTransport(CBFSpeadTransport):
         if (index - self._last_metadata) * self.stream.interval >= 5.0:
             self._last_metadata = index
             await self.send_metadata(start=False)
-        substream_channels = self.stream.n_channels // self.stream.n_substreams
-        timestamp = int(index * self.stream.timesteps * self.stream.n_channels * \
-                self.stream.scale_factor_timestamp / self.stream.bandwidth)
+        timestamp = int(index * self.stream.timesteps * self.stream.n_channels
+                        * self.stream.scale_factor_timestamp / self.stream.bandwidth)
         timestamp += self.stream.start_timestamp
         # Truncate timestamp to the width of the field it is in
         timestamp = timestamp & ((1 << self._flavour.heap_address_bits) - 1)
