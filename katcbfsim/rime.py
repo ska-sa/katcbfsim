@@ -48,13 +48,13 @@ class RimeTemplate(object):
         if tuning is None:
             tuning = self.autotune(context, max_antennas)
         self.predict_wgs = tuning['predict_wgs']
-        self.predict_program = accel.build(context, 'predict.mako',
-            {'max_antennas': max_antennas},
+        self.predict_program = accel.build(
+            context, 'predict.mako', {'max_antennas': max_antennas},
             extra_dirs=[pkg_resources.resource_filename(__name__, '')])
         self.sample_wgs = tuning['sample_wgs']
         self.sample_rows = tuning['sample_rows']
-        self.sample_program = accel.build(context, 'sample.mako',
-            {},
+        self.sample_program = accel.build(
+            context, 'sample.mako', {},
             extra_dirs=[pkg_resources.resource_filename(__name__, '')])
 
     @classmethod
@@ -73,6 +73,7 @@ class RimeTemplate(object):
                     for i in range(n_antennas)]
         # The values are irrelevant, we just need the memory to be there.
         out = accel.DeviceArray(context, (n_channels, n_baselines, 2, 2, 2), np.int32)
+
         def generate_predict(predict_wgs):
             tuning = dict(predict_wgs=predict_wgs, sample_wgs=256, sample_rows=64)
             fn = cls(context, max_antennas, tuning).instantiate(
@@ -82,6 +83,7 @@ class RimeTemplate(object):
             fn._update_die()
             queue.finish()  # _update_scaled_phase is asynchronous
             return tune.make_measure(queue, fn._run_predict)
+
         def generate_sample(sample_wgs, sample_rows):
             tuning = dict(predict_wgs=64, sample_wgs=sample_wgs, sample_rows=sample_rows)
             fn = cls(context, max_antennas, tuning).instantiate(
@@ -98,7 +100,7 @@ class RimeTemplate(object):
         tuning = {}
         tuning.update(tune.autotune(generate_predict, predict_wgs=wgss))
         tuning.update(tune.autotune(generate_sample, sample_wgs=wgss,
-            sample_rows=[16, 64, 256]))
+                                    sample_rows=[16, 64, 256]))
         return tuning
 
     def instantiate(self, *args, **kwargs):
@@ -148,20 +150,25 @@ class Rime(accel.Operation):
         self._inv_wavelength.set(command_queue, inv_wavelength)
         # Set up internal arrays.
         # TODO: these should have slots too, to give the caller control over aliasing etc.
-        self._scaled_phase = accel.DeviceArray(command_queue.context, (n_sources, n_antennas), np.float32)
+        self._scaled_phase = accel.DeviceArray(command_queue.context,
+                                               (n_sources, n_antennas), np.float32)
         self._scaled_phase_host = self._scaled_phase.empty_like()
         self._flux_models = np.empty((n_channels, n_sources, 4), np.float32)
-        self._flux_density = accel.DeviceArray(command_queue.context, (n_channels, n_sources, 2, 2), np.complex64)
+        self._flux_density = accel.DeviceArray(command_queue.context,
+                                               (n_channels, n_sources, 2, 2), np.complex64)
         self._flux_density_host = self._flux_density.empty_like()
         # Combination of all direction-independent effects
-        self._die = accel.DeviceArray(command_queue.context, (n_channels, n_antennas, 2, 2), np.complex64)
+        self._die = accel.DeviceArray(command_queue.context,
+                                      (n_channels, n_antennas, 2, 2), np.complex64)
         self._die_host = self._die.empty_like()
         # Antenna effects (bandpass, gain, polarization leakage) *after* feed rotation
         self.gain = np.zeros((n_channels, n_antennas, 2, 2), np.complex64)
         # Set up the internal baseline mapping
         # TODO: this could live in the template
-        self._baselines = accel.DeviceArray(command_queue.context, (n_padded_baselines, 2), np.int16)
-        self._autocorrs = accel.DeviceArray(command_queue.context, (n_antennas,), np.int32)
+        self._baselines = accel.DeviceArray(command_queue.context,
+                                            (n_padded_baselines, 2), np.int16)
+        self._autocorrs = accel.DeviceArray(command_queue.context,
+                                            (n_antennas,), np.int32)
         baselines_host = self._baselines.empty_like()
         autocorrs_host = self._autocorrs.empty_like()
         next_baseline = 0
@@ -225,7 +232,8 @@ class Rime(accel.Operation):
 
         # Determine scaling factor for Airy function
         # 1.029 is the beam width factor for an ideal Airy disk
-        airy_scale = np.pi * self.antennas[0].diameter / katpoint.lightspeed * (1.029 / self.antennas[0].beamwidth)
+        airy_scale = np.pi * self.antennas[0].diameter / katpoint.lightspeed \
+            * (1.029 / self.antennas[0].beamwidth)
         angles = np.empty((len(self.sources),), np.float64)
         # Find angles between sources and the pointing direction
         for i, source in enumerate(self.sources):

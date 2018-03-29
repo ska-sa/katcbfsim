@@ -1,7 +1,6 @@
 import logging
 import collections
 import math
-import functools
 import asyncio
 
 import numpy as np
@@ -925,8 +924,8 @@ class BeamformerStream(CBFStream):
     def __init__(self, subarray, name, adc_rate, center_frequency, bandwidth,
                  n_channels, n_substreams, timesteps, sample_bits, loop=None):
         super(BeamformerStream, self).__init__(
-                subarray, name, adc_rate, center_frequency, bandwidth,
-                n_channels, n_substreams, loop)
+            subarray, name, adc_rate, center_frequency, bandwidth,
+            n_channels, n_substreams, loop)
         self.timesteps = timesteps
         self.sample_bits = sample_bits
         if sample_bits == 8:

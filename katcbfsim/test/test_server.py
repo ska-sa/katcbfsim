@@ -1,28 +1,25 @@
 """Coverage tests for katcp interface"""
 
-import functools
 from unittest import mock
 import asyncio
-import re
 
-from nose.tools import *
+from nose.tools import (assert_equal, assert_is_not_none, assert_greater_equal,
+                        assert_true, assert_false, assert_regexp_matches)
 import asynctest
 
 import aiokatcp
 
-from katsdpsigproc import accel
-from katsdpsigproc.test.test_accel import device_test, cuda_test, force_autotune
+from katsdpsigproc.test.test_accel import device_test, cuda_test
 
 import katsdptelstate
-from katsdptelstate.endpoint import Endpoint
 
-from katcbfsim import server, stream, transport
+from katcbfsim import server, transport
 
 
-M062_DESCRIPTION = 'm062, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -1440.69968823 -2269.26759132 6.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22'
-M063_DESCRIPTION = 'm063, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -3419.58251626 -1606.01510973 2.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22'
+M062_DESCRIPTION = 'm062, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -1440.69968823 -2269.26759132 6.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22'  # noqa: E501
+M063_DESCRIPTION = 'm063, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -3419.58251626 -1606.01510973 2.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22'  # noqa: E501
 # Modified version of m062, to test antenna replacement
-M062_ALT_DESCRIPTION = 'm062, -30:00:00.0, 21:26:38.0, 1035.0, 13.5, -1440.69968823 -2269.26759132 6.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22'
+M062_ALT_DESCRIPTION = 'm062, -30:00:00.0, 21:26:38.0, 1035.0, 13.5, -1440.69968823 -2269.26759132 6.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22'  # noqa: E501
 
 
 # Last created MockTransport, for tests to reach in and check state
@@ -101,10 +98,12 @@ class TestSimulationServer(asynctest.TestCase):
         port = self._sync_setup()
         await self._server.start()
         self.addCleanup(self._server.stop)
-        self._reader, self._writer = await asyncio.open_connection('127.0.0.1', port, loop=self.loop)
+        self._reader, self._writer = \
+            await asyncio.open_connection('127.0.0.1', port, loop=self.loop)
         self._mid = 1
 
     async def tearDown(self):
+        global _current_transport
         self._writer.close()
         _current_transport = None
 
@@ -183,8 +182,10 @@ class TestSimulationServer(asynctest.TestCase):
         await self.make_request('antenna-add', M062_DESCRIPTION)
         await self.make_request('antenna-add', M063_DESCRIPTION)
         # One source with a flux model, one without
-        await self.make_request('source-add', 'test1, radec, 3:30:00.00, -35:00:00.0, (500.0 2000.0 1.0)')
-        await self.make_request('source-add', 'test2, radec, 3:33:00.00, -35:01:00.0')
+        await self.make_request('source-add',
+                                'test1, radec, 3:30:00.00, -35:00:00.0, (500.0 2000.0 1.0)')
+        await self.make_request('source-add',
+                                'test2, radec, 3:33:00.00, -35:01:00.0')
         await self.make_request('target', 'target, radec, 3:15:00.00, -36:00:00.0')
 
     def _check_attribute(self, telstate, key, value):
@@ -265,7 +266,8 @@ class TestSimulationServer(asynctest.TestCase):
         await self._configure_subarray()
         name = 'i0.tied-array-channelised-voltage.0x'
         uname = 'i0_tied_array_channelised_voltage_0x'
-        await self.make_request('stream-create-beamformer', name, 1712000000, 1284000000, 856000000, 4096, 4, 256, 8)
+        await self.make_request('stream-create-beamformer', name,
+                                1712000000, 1284000000, 856000000, 4096, 4, 256, 8)
         await self.make_request('capture-destination', name, '127.0.0.1:7149', 'lo', False)
         await self.make_request('capture-start', name)
         for i in range(min_dumps):
@@ -292,35 +294,61 @@ class TestSimulationServer(asynctest.TestCase):
 
     async def test_unknown_stream_name(self):
         """An appropriate error is returned when using an unknown stream name."""
-        await self.assert_request_fails('^requested stream name "unknown" not found$', 'capture-destination', 'unknown', '127.0.0.1:7147')
-        await self.assert_request_fails('^requested stream name "unknown" not found$', 'capture-destination-file', 'unknown', '/dev/null')
-        await self.assert_request_fails('^requested stream name "unknown" not found$', 'capture-start', 'unknown')
-        await self.assert_request_fails('^requested stream name "unknown" not found$', 'capture-stop', 'unknown')
-        await self.assert_request_fails('^requested stream name "unknown" not found$', 'accumulation-length', 'unknown', 0.5)
-        await self.assert_request_fails('^requested stream name "unknown" not found$', 'frequency-select', 'unknown', 1000000000)
+        await self.assert_request_fails(
+            '^requested stream name "unknown" not found$',
+            'capture-destination', 'unknown', '127.0.0.1:7147')
+        await self.assert_request_fails(
+            '^requested stream name "unknown" not found$',
+            'capture-destination-file', 'unknown', '/dev/null')
+        await self.assert_request_fails(
+            '^requested stream name "unknown" not found$',
+            'capture-start', 'unknown')
+        await self.assert_request_fails(
+            '^requested stream name "unknown" not found$',
+            'capture-stop', 'unknown')
+        await self.assert_request_fails(
+            '^requested stream name "unknown" not found$',
+            'accumulation-length', 'unknown', 0.5)
+        await self.assert_request_fails(
+            '^requested stream name "unknown" not found$',
+            'frequency-select', 'unknown', 1000000000)
 
     async def test_change_while_capturing(self):
         """An appropriate error is returned when trying to change values while
         a capture is in progress."""
         await self._configure_subarray()
         # Use lower bandwidth to reduce test time
-        await self.make_request('stream-create-beamformer', 'beam1', 1712000000, 1284000000, 856000000 / 4, 32768, 16, 256, 8)
+        await self.make_request('stream-create-beamformer', 'beam1',
+                                1712000000, 1284000000, 856000000 / 4, 32768, 16, 256, 8)
         await self.make_request('capture-destination', 'beam1', '127.0.0.1:7149')
         await self.make_request('capture-start', 'beam1')
-        await self.assert_request_fails('^cannot modify antennas while capture is in progress$', 'antenna-add', M062_DESCRIPTION)
-        await self.assert_request_fails('^cannot add source while capture is in progress$', 'source-add', 'test3, radec, 3:30:00.00, -35:00:00.0, (500.0 2000.0 1.0)')
-        await self.assert_request_fails('^cannot set clock_ratio while capture is in progress$', 'clock-ratio', 1.0)
-        await self.assert_request_fails('^cannot set center_frequency while capture is in progress', 'frequency-select', 'beam1', 10000000000)
+        await self.assert_request_fails(
+            '^cannot modify antennas while capture is in progress$',
+            'antenna-add', M062_DESCRIPTION)
+        await self.assert_request_fails(
+            '^cannot add source while capture is in progress$',
+            'source-add', 'test3, radec, 3:30:00.00, -35:00:00.0, (500.0 2000.0 1.0)')
+        await self.assert_request_fails(
+            '^cannot set clock_ratio while capture is in progress$',
+            'clock-ratio', 1.0)
+        await self.assert_request_fails(
+            '^cannot set center_frequency while capture is in progress',
+            'frequency-select', 'beam1', 10000000000)
         await self.make_request('capture-stop', 'beam1')
 
     async def test_change_while_streams_exist(self):
         """An appropriate error is returned when trying to change values while
         a stream exists."""
         await self._configure_subarray()
-        await self.make_request('stream-create-beamformer', 'beam1', 1712000000, 1284000000, 856000000, 32768, 16, 256, 8)
-        await self.assert_request_fails('^cannot add new antennas after creating a stream$',
-            'antenna-add', 'm123, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -1440.69968823 -2269.26759132 6.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22')
-        await self.assert_request_fails('^cannot set sync_time after creating a stream$',
+        await self.make_request(
+            'stream-create-beamformer', 'beam1',
+            1712000000, 1284000000, 856000000, 32768, 16, 256, 8)
+        await self.assert_request_fails(
+            '^cannot add new antennas after creating a stream$',
+            'antenna-add',
+            'm123, -30:42:47.4, 21:26:38.0, 1035.0, 13.5, -1440.69968823 -2269.26759132 6.0, -0:05:44.7 0 0:00:22.6 -0:09:04.2 0:00:11.9 -0:00:12.8 -0:04:03.5 0 0 -0:01:33.0 0:01:45.6 0 0 0 0 0 -0:00:03.6 -0:00:17.5, 1.22')  # noqa: E501
+        await self.assert_request_fails(
+            '^cannot set sync_time after creating a stream$',
             'sync-time', 1446544133)
 
     async def _get_antenna_descriptions(self):

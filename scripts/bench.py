@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import numpy as np
 import katconf
 import katpoint
 import logging
@@ -27,6 +26,7 @@ def get_antennas_katconfig_meerkat():
 
     return [make_antenna(i) for i in range(64)]
 
+
 def main():
     logging.basicConfig(level=logging.DEBUG)
     context = accel.create_some_context()
@@ -41,6 +41,7 @@ def main():
     for i in range(10):
         fn()
         fn.set_time(fn.time + 0.5)
+
 
 if __name__ == '__main__':
     main()

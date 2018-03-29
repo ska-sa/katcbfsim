@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 
-import katconf
 import katpoint
 import casacore.tables as tables
-import os
 import numpy as np
 
 
@@ -22,14 +20,15 @@ def antenna_desc():
     type_ = tables.makescacoldesc('TYPE', '')
     mount = tables.makescacoldesc('MOUNT', '')
     position_keywords = {
-            'QuantumUnits': ['m', 'm', 'm'],
-            'MEASINFO': {'type': 'position', 'Ref': 'WGS84'}
-        }
+        'QuantumUnits': ['m', 'm', 'm'],
+        'MEASINFO': {'type': 'position', 'Ref': 'WGS84'}
+    }
     position = tables.makearrcoldesc('POSITION', 0.0, shape=(3,), keywords=position_keywords)
     offset = tables.makearrcoldesc('OFFSET', 0.0, shape=(3,), keywords=position_keywords)
     dish_diameter = tables.makescacoldesc('DISH_DIAMETER', 0.0, keywords={'QuantumUnits': ['m']})
     flag_row = tables.makescacoldesc('FLAG_ROW', False)
-    return tables.maketabdesc([name, station, type_, mount, position, offset, dish_diameter, flag_row])
+    return tables.maketabdesc([name, station, type_, mount, position, offset,
+                               dish_diameter, flag_row])
 
 
 def main():

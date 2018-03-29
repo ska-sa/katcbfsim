@@ -3,7 +3,7 @@
 from katsdpsigproc import accel
 from katsdpsigproc.test.test_accel import device_test, cuda_test, force_autotune
 from katcbfsim import rime
-from nose.tools import *
+from nose.tools import nottest, assert_true, assert_greater
 import katpoint
 import numpy as np
 import scipy.stats
@@ -31,7 +31,7 @@ def boxm_test(*args):
         The test statistic
     p-value : float
         The p-value of the test
-    """
+    """   # noqa: E501
     Si = [np.atleast_2d(np.cov(x)) for x in args]
     ni = [x.shape[1] for x in args]
     k = len(Si[0])
@@ -99,18 +99,18 @@ class TestRime(object):
             [stokes[2] - 1j * stokes[3], stokes[0] - stokes[1]]])
         sefd = 20.0   # Jansky
 
-        ### Prepare the operation
+        # Prepare the operation
         template = rime.RimeTemplate(context, n_antennas)
         # The actual antennas are irrelevant for this test
         antennas = [None] * n_antennas
         fn = template.instantiate(queue, 1284e6, 856e6, n_channels,
-                n_accs, [], antennas, sefd, seed=1)
+                                  n_accs, [], antennas, sefd, seed=1)
         fn.bind(out=out_data)
         fn.ensure_all_bound()
         # Set gains to all identity
         fn.gain[:] = np.tile(np.identity(2, np.complex64), (n_channels, n_antennas, 1, 1))
 
-        ### Predict expected visibilities
+        # Predict expected visibilities
         predict = []
         in_data_host = in_data.empty_like()
         for channel in range(n_channels):
@@ -140,7 +140,7 @@ class TestRime(object):
             out_data.get(queue, out_data_host)
             device_samples[..., i] = out_data_host[..., 0] + 1j * out_data_host[..., 1]
 
-        ### Compare to a simple CPU simulation
+        # Compare to a simple CPU simulation
         for channel in range(n_channels):
             V = predict[channel]
             # Generate random voltage samples, which are circularly
