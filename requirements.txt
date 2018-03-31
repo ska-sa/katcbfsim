@@ -18,6 +18,7 @@ pkginfo
 py
 pycuda
 pyephem
+pygelf
 pytest
 python-dateutil
 pytools
