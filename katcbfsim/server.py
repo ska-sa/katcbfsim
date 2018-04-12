@@ -109,19 +109,19 @@ class SimulatorServer(aiokatcp.DeviceServer):
             stream.set_telstate(self._telstate)
         self._streams[stream.name] = stream
         self._stream_sensors[stream] = {
-            'bandwidth': Sensor(
+            'output-bandwidth': Sensor(
                 float, '{}.bandwidth'.format(stream.name),
-                'The bandwidth currently configured for the data stream',
+                'The bandwidth currently configured for the data stream (prometheus: gauge)',
                 'Hz', default=stream.bandwidth,
                 initial_status=Sensor.Status.NOMINAL),
-            'channels': Sensor(
-                int, '{}.channels'.format(stream.name),
-                'The number of channels of the channelised data stream',
+            'output-n-chans': Sensor(
+                int, '{}.output-n-chans'.format(stream.name),
+                'The number of channels of the channelised data stream (prometheus: gauge)',
                 '', default=stream.n_channels,
                 initial_status=Sensor.Status.NOMINAL),
-            'centerfrequency': Sensor(
-                float, '{}.centerfrequency'.format(stream.name),
-                'The center frequency for the data stream', 'Hz')
+            'output-center-freq': Sensor(
+                float, '{}.output-center-freq'.format(stream.name),
+                'The center frequency for the data stream (prometheus: gauge)', 'Hz')
         }
         for sensor in self._stream_sensors[stream].values():
             self.sensors.add(sensor)
@@ -295,7 +295,7 @@ class SimulatorServer(aiokatcp.DeviceServer):
     def set_center_frequency(self, stream, frequency):
         stream.center_frequency = frequency
         # TODO: get the simulated timestamp from the stream
-        self._stream_sensors[stream]['centerfrequency'].set_value(frequency)
+        self._stream_sensors[stream]['output-center-freq'].set_value(frequency)
 
     @_stream_exceptions
     @_stream_request
