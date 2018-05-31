@@ -15,7 +15,6 @@ import katcbfsim
 from . import transport
 from .stream import (Subarray, FXStream, BeamformerStream,
                      StreamError, UnsupportedStreamError, ConfigError)
-from .source import Source
 
 
 logger = logging.getLogger(__name__)
@@ -345,8 +344,8 @@ class SimulatorServer(aiokatcp.DeviceServer):
     @_stream_exceptions
     async def request_source_add(self, ctx: RequestContext, source_str: str) -> None:
         """Add a source to the sky model, in the format accepted by
-        :class:`katcbfsim.source.Source`."""
-        self.add_source(Source(source_str))
+        :class:`katpoint.Target`."""
+        self.add_source(katpoint.Target(source_str))
 
     async def request_source_list(self, ctx: RequestContext) -> None:
         """List the sources in the sky model."""
