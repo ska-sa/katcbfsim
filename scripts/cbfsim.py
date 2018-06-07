@@ -12,7 +12,6 @@ import katpoint
 
 import katcbfsim.server
 from katcbfsim.stream import Subarray
-from katcbfsim.source import Source
 from katcbfsim.transport import DEFAULT_MAX_PACKET_SIZE
 
 
@@ -80,11 +79,11 @@ def prepare_server(server, args):
             for line in f:
                 add_antenna(line)
     for source in args.cbf_sim_sources:
-        server.add_source(Source(source['description']))
+        server.add_source(katpoint.Target(source['description']))
     if args.cbf_sim_source_file is not None:
         with open(args.cbf_sim_source_file) as f:
             for line in f:
-                server.add_source(Source(line))
+                server.add_source(katpoint.Target(line))
     if args.cbf_sync_time is None:
         args.cbf_sync_time = time.time()
     server.set_sync_time(args.cbf_sync_time)

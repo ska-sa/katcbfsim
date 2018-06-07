@@ -6,7 +6,6 @@ futures
 h5py
 ipaddress
 katversion
-jsonschema==2.5.1
 llvmlite
 Mako
 MarkupSafe

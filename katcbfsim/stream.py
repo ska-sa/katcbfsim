@@ -11,7 +11,7 @@ from katsdpsigproc import accel
 from katsdpsigproc.asyncio import resource
 import katpoint
 
-from . import rime, source
+from . import rime
 
 
 logger = logging.getLogger(__name__)
@@ -117,7 +117,7 @@ class Subarray(object):
     antennas : list of :class:`katpoint.Antenna`
         The antennas in the simulated array. The values are
         capture-immutable, while the list size is stream-immutable.
-    sources : list of :class:`katcbfsim.source.Source`
+    sources : list of :class:`katpoint.Target`
         The simulated sources. Only point sources are currently supported.
         The do not necessarily have to be radec targets, and the position
         and flux model are mutable, but the list size is capture-immutable.
@@ -185,7 +185,7 @@ class Subarray(object):
 
         Parameters
         ----------
-        source : :class:`katcbfsim.source.Source`
+        source : :class:`katpoint.Target`
             New source
 
         Raises
@@ -210,7 +210,7 @@ class Subarray(object):
             Time at which to look up the target
         """
         if not self.sources:
-            self.sources.append(source.Source(self.target_at(timestamp)))
+            self.sources.append(self.target_at(timestamp))
 
     sync_time = _StreamImmutableProperty('_sync_time')
     gain = _CaptureImmutableProperty('_gain')

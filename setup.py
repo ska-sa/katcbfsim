@@ -15,7 +15,7 @@ setup(
     setup_requires=['katversion'],
     install_requires=[
         'aiokatcp', 'spead2>=1.5.0', 'katpoint', 'numpy', 'h5py',
-        'katsdpsigproc[CUDA]', 'katsdptelstate', 'jsonschema', 'netifaces', 'numba',
+        'katsdpsigproc[CUDA]', 'katsdptelstate', 'netifaces', 'numba',
         'katsdpservices'],
     tests_require=tests_require,
     extras_require={'test': tests_require, 'doc': ['sphinx>=1.3']},
