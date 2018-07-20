@@ -1,3 +1,4 @@
+aiokatcp
 appdirs
 decorator
 fakeredis
@@ -25,8 +26,7 @@ pytz
 redis
 scipy
 six
-spead2==1.6.0
-git+ssh://git@github.com/ska-sa/aiokatcp#egg=aiokatcp
+spead2
 git+ssh://git@github.com/ska-sa/katpoint#egg=katpoint
 git+ssh://git@github.com/ska-sa/katsdptelstate#egg=katsdptelstate
 git+ssh://git@github.com/ska-sa/katsdpservices#egg=katsdpservices
