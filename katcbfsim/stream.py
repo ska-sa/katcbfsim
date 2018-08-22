@@ -525,7 +525,6 @@ class CBFStream(Stream):
     def _instrument_sensors(self, view):
         # Only the sensors captured by cam2telstate are simulated
         self.sensor(view, 'adc_sample_rate', self.adc_rate)
-        self.sensor(view, 'bandwidth', self.bandwidth)
         self.sensor(view, 'scale_factor_timestamp', self.scale_factor_timestamp)
         self.sensor(view, 'sync_time', self.subarray.sync_time.secs)
         self.sensor(view, 'n_inputs', 2 * self.n_antennas)
@@ -538,6 +537,7 @@ class CBFStream(Stream):
             self.sensor(view, input_pre + 'delay_ok', True, immutable=False)
             self.sensor(view, input_pre + 'eq', [200 + 0j], immutable=False)
             self.sensor(view, input_pre + 'fft0_shift', 32767, immutable=False)
+        self.sensor(view, 'bandwidth', self.bandwidth)
         self.sensor(view, 'center_freq', float(self.center_frequency))
         self.sensor(view, 'n_chans', self.n_channels)
         self.sensor(view, 'ticks_between_spectra',
@@ -867,6 +867,7 @@ class FXStream(CBFStream):
                         name1 = self.subarray.antennas[i].name + pol1
                         name2 = self.subarray.antennas[j].name + pol2
                         baselines.append((name1, name2))
+        self.sensor(view, 'bandwidth', self.bandwidth)
         self.sensor(view, 'bls_ordering', baselines)
         self.sensor(view, 'int_time', self.accumulation_length)
         self.sensor(view, 'n_accs', self.n_accs)
@@ -999,6 +1000,7 @@ class BeamformerStream(CBFStream):
                     await transport.close()
 
     def _tied_array_channelised_voltage_sensors(self, view):
+        self.sensor(view, 'bandwidth', self.bandwidth)
         self.sensor(view, 'n_chans', self.n_channels, immutable=False)
         self.sensor(view, 'n_chans_per_substream', self.n_channels // self.n_substreams)
         self.sensor(view, 'spectra_per_heap', self.timesteps)
