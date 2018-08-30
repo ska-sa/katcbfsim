@@ -199,7 +199,6 @@ class TestSimulationServer(asynctest.TestCase):
     def _check_common_telstate(self):
         instrument_view = self._telstate.view('i0', exclusive=True)
         self._check_attribute(instrument_view, 'adc_sample_rate', 1712000000.0)
-        self._check_attribute(instrument_view, 'bandwidth', 856000000.0)
         self._check_attribute(instrument_view, 'n_inputs', 4)
         self._check_attribute(instrument_view, 'scale_factor_timestamp', 1712000000)
         self._check_attribute(instrument_view, 'sync_time', mock.ANY)
@@ -244,6 +243,7 @@ class TestSimulationServer(asynctest.TestCase):
         self._check_common_telstate()
         n_accs = 408 * 256   # Gives nearest to 0.5s
         view = self._telstate.view('i0_baseline_correlation_products')
+        self._check_attribute(view, 'bandwidth', 856000000.0)
         self._check_attribute(view, 'bls_ordering', bls_ordering)
         # 0.5 rounded to nearest acceptable interval
         self._check_attribute(view, 'int_time', n_accs * 2 * 4096 / 1712000000.0)
@@ -279,6 +279,7 @@ class TestSimulationServer(asynctest.TestCase):
         self._check_common_telstate()
         view = self._telstate.view(uname)
         self._check_sensor(view, 'n_chans', 4096)
+        self._check_attribute(view, 'bandwidth', 856000000.0)
         self._check_attribute(view, 'n_chans_per_substream', 1024)
         self._check_attribute(view, 'spectra_per_heap', 256)
         for i in range(4):   # input
