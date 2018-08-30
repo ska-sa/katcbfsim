@@ -97,8 +97,7 @@ def prepare_server(server, args):
         stream = server.add_fx_stream(
             args.create_fx_stream,
             args.cbf_adc_sample_rate, args.cbf_center_freq, args.cbf_bandwidth,
-            args.cbf_channels, args.cbf_substreams)
-        server.set_accumulation_length(stream, args.cbf_int_time)
+            args.cbf_channels, args.cbf_substreams, args.cbf_int_time)
         server.set_destination(stream, args.cbf_spead, ifaddr, args.cbf_ibv,
                                args.max_packet_size)
         if args.dumps:

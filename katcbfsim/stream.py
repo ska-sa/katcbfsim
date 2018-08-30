@@ -593,6 +593,9 @@ class FXStream(CBFStream):
         Number of channels in the stream
     n_substreams : int
         Number of substreams (X-engines)
+    accumulation_length : float
+        Approximate simulated integration time in seconds. It will be rounded
+        to the nearest supported value.
     loop : :class:`asyncio.BaseEventLoop`, optional
         Event loop for coroutines
 
@@ -611,11 +614,14 @@ class FXStream(CBFStream):
         indirectly by writing to :attr:`accumulation_length`.
     """
     def __init__(self, context, subarray, name, adc_rate,
-                 center_frequency, bandwidth, n_channels, n_substreams, loop=None):
+                 center_frequency, bandwidth, n_channels, n_substreams,
+                 accumulation_length=None, loop=None):
         super(FXStream, self).__init__(subarray, name, adc_rate, center_frequency,
                                        bandwidth, n_channels, n_substreams, loop)
         self.context = context
-        self.accumulation_length = 0.5
+        if accumulation_length is None:
+            accumulation_length = 0.5
+        self.accumulation_length = accumulation_length
         self.sefd = 400.0   # Jansky
         self.seed = 1
 
