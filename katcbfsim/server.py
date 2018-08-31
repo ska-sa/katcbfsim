@@ -138,7 +138,7 @@ class SimulatorServer(aiokatcp.DeviceServer):
     async def request_stream_create_correlator(
             self, ctx: RequestContext,
             name: str, adc_rate: float, center_frequency: float, bandwidth: float,
-            n_channels: int, n_substreams: int = None) -> None:
+            n_channels: int, n_substreams: int = None, accumulation_length: float = None) -> None:
         """Create a new simulated correlator stream
 
         Parameters
@@ -155,6 +155,8 @@ class SimulatorServer(aiokatcp.DeviceServer):
             Number of channels in the stream
         n_substreams : int, optional
             Number of substreams (X engines)
+        accumulation_length : float, optional
+            Approximate integration time (rounded by the implementation)
         """
         if name in self._streams:
             raise FailReply('stream {} already exists'.format(name))
@@ -162,7 +164,8 @@ class SimulatorServer(aiokatcp.DeviceServer):
             raise FailReply('cannot add a stream while halting')
         if self._context is None:
             raise FailReply('no device context available')
-        self.add_fx_stream(name, adc_rate, center_frequency, bandwidth, n_channels, n_substreams)
+        self.add_fx_stream(name, adc_rate, center_frequency, bandwidth, n_channels,
+                           n_substreams, accumulation_length)
 
     async def request_stream_create_beamformer(
             self, ctx: RequestContext,
