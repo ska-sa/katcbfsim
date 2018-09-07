@@ -968,7 +968,7 @@ class BeamformerStream(CBFStream):
         """Capture co-routine, started by :meth:`capture_start` and joined by
         :meth:`capture_stop`.
         """
-        transport = None
+        transports = None
         dump_futures = collections.deque()
         try:
             transports = [factory(self) for factory in self.transport_factories]
