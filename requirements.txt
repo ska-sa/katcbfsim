@@ -11,6 +11,7 @@ katversion
 llvmlite
 Mako
 MarkupSafe
+msgpack
 netifaces
 numba
 numpy
