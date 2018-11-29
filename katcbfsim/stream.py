@@ -360,7 +360,10 @@ class Stream(object):
         # stops.
         if not self._stop_future.done():
             self._stop_future.set_result(None)
-        await self._capture_future
+        try:
+            await self._capture_future
+        except Exception:
+            logger.warning('Exception in capture coroutine', exc_info=True)
         self._stop_future = None
         self._capture_future = None
         self.start_time = None
@@ -861,7 +864,7 @@ class FXStream(CBFStream):
             for future in dump_futures:
                 if not future.done():
                     future.cancel()
-            if transport is not None:
+            for transport in transports:
                 await transport.close()
 
     def _baseline_correlation_products_sensors(self, view):
