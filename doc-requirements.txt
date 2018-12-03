@@ -1,10 +1,14 @@
 alabaster
 Babel
 docutils
+imagesize
 Jinja2
 MarkupSafe
+packaging
 Pygments
 pytz
+requests
 snowballstemmer
 Sphinx
+sphinxcontrib-websupport
 sphinx-rtd-theme
