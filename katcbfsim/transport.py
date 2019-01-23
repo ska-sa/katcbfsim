@@ -12,7 +12,11 @@ import spead2.send
 import spead2.send.asyncio
 
 
-DEFAULT_MAX_PACKET_SIZE = 4096 + 40       # 40 bytes of SPEAD headers in every packet
+# This is tuned for the beamformer output: each packet contains
+# - SPEAD header (8 bytes)
+# - standard SPEAD items (4 * 8 bytes)
+# - beamformer-specific items (3 * 8 bytes)
+DEFAULT_MAX_PACKET_SIZE = 4096 + 64
 logger = logging.getLogger(__name__)
 
 
@@ -183,6 +187,7 @@ class FXSpeadTransport(CBFSpeadTransport):
             self.ig_data['timestamp'].value = timestamp
             self.ig_data['frequency'].value = substream.channel_range.start
             heap = self.ig_data.get_heap()
+            heap.repeat_pointers = True
             futures.append(asyncio.ensure_future(substream.sender.async_send_heap(heap),
                                                  loop=self.stream.loop))
         await asyncio.gather(*futures, loop=self.stream.loop)
@@ -272,5 +277,6 @@ class BeamformerSpeadTransport(CBFSpeadTransport):
             self.ig_data['timestamp'].value = timestamp
             self.ig_data['frequency'].value = substream.channel_range.start
             heap = self.ig_data.get_heap()
+            heap.repeat_pointers = True
             futures.append(substream.sender.async_send_heap(heap))
         await asyncio.gather(*futures, loop=self.stream.loop)

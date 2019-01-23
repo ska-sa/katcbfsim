@@ -28,7 +28,7 @@ pytz
 redis
 scipy
 six
-spead2
+spead2==1.11.1     # Need newer version than katsdpdockerbase currently provides
 git+ssh://git@github.com/ska-sa/katpoint#egg=katpoint
 git+ssh://git@github.com/ska-sa/katsdptelstate#egg=katsdptelstate
 git+ssh://git@github.com/ska-sa/katsdpservices#egg=katsdpservices
