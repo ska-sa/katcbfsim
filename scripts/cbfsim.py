@@ -34,8 +34,13 @@ class TelstateSubarray(Subarray):
         try:
             target = self._telstate.get_range('cbf_target', None, timestamp.secs)
             # Exclude both missing target and empty target string
-            if target and target[-1][0]:
-                return katpoint.Target(target[-1][0])  # Last element, value part of tuple
+            if target and target[-1][0]:    # Last element, value part of tuple
+                # katpoint doesn't support bytes
+                if isinstance(target[-1][0], bytes):
+                    cbf_target = target[-1][0].decode()
+                else:
+                    cbf_target = target[-1][0]
+                return katpoint.Target(cbf_target)
         except KeyError:
             pass
         # Failed, so fall back to the base class
