@@ -1010,11 +1010,9 @@ class BeamformerStream(CBFStream):
 
     def _tied_array_channelised_voltage_sensors(self, view):
         self.sensor(view, 'bandwidth', self.bandwidth)
-        self.sensor(view, 'n_chans', self.n_channels, immutable=False)
         self.sensor(view, 'n_chans_per_substream', self.n_channels // self.n_substreams)
         self.sensor(view, 'spectra_per_heap', self.timesteps)
-        for i in range(2 * self.n_antennas):
-            self.sensor(view, 'input{}_weight'.format(i), 1.0, immutable=False)
+        self.sensor(view, 'weight', str([1.0] * (2 * self.n_antennas)), immutable=False)
 
     def set_telstate(self, telstate):
         super(BeamformerStream, self).set_telstate(telstate)
