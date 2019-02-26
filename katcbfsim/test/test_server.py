@@ -278,12 +278,10 @@ class TestSimulationServer(asynctest.TestCase):
         assert_true(_current_transport.closed)
         self._check_common_telstate()
         view = self._telstate.view(uname)
-        self._check_sensor(view, 'n_chans', 4096)
         self._check_attribute(view, 'bandwidth', 856000000.0)
         self._check_attribute(view, 'n_chans_per_substream', 1024)
         self._check_attribute(view, 'spectra_per_heap', 256)
-        for i in range(4):   # input
-            self._check_sensor(view, 'input{}_weight'.format(i), 1.0)
+        self._check_sensor(view, 'weight', '[1.0, 1.0, 1.0, 1.0]')
 
     async def test_beamformer_capture(self):
         """Create a beamformer target, start it, and stop it again"""
