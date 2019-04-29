@@ -1,6 +1,6 @@
 #!groovy
 @Library('katsdpjenkins') _
-
+katsdp.killOldJobs()
 katsdp.setDependencies([
     'ska-sa/katsdpsigproc/master',
     'ska-sa/katpoint/master',
