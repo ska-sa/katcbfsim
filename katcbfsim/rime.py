@@ -110,7 +110,7 @@ class Rime(accel.Operation):
     def __init__(
             self, template, command_queue,
             center_frequency, bandwidth, n_channels, n_accs,
-            sources, antennas, sefd, seed=None, async=False, allocator=None):
+            sources, antennas, sefd, seed=None, async_=False, allocator=None):
         if len(antennas) > template.max_antennas:
             raise ValueError('Too many antennas for the template')
         super(Rime, self).__init__(command_queue, allocator)
@@ -122,7 +122,7 @@ class Rime(accel.Operation):
         self.sefd = sefd
         self.seed = seed if seed is not None else np.random.randint(0, 2**63 - 1)
         self._sequence = 0
-        self.async = async
+        self.async_ = async_
         n_antennas = len(antennas)
         n_sources = len(sources)
         n_baselines = n_antennas * (n_antennas + 1) // 2
@@ -366,7 +366,7 @@ class Rime(accel.Operation):
         self._run_predict()
         self._run_sample()
         logger.debug('Kernels queued')
-        if self.async:
+        if self.async_:
             return transfer_event
         else:
             # Make sure that the host->device transfers have completed, so that we

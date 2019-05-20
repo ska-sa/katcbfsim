@@ -715,7 +715,7 @@ class FXStream(CBFStream):
             queue, my_center_frequency, my_bandwidth,
             my_n_channels, self.n_accs,
             self.subarray.sources, self.subarray.antennas,
-            self.sefd, self.seed, async=True)
+            self.sefd, self.seed, async_=True)
         predict.ensure_all_bound()
         # Initialise gains. Eventually this will need to be more sophisticated, but
         # for now it is just real and diagonal.
