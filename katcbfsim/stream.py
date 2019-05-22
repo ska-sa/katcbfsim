@@ -7,8 +7,7 @@ import numpy as np
 import scipy.interpolate
 
 import katsdptelstate
-from katsdpsigproc import accel
-from katsdpsigproc.asyncio import resource
+from katsdpsigproc import accel, resource
 import katpoint
 
 from . import rime
