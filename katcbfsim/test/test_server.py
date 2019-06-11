@@ -81,13 +81,11 @@ class TestSimulationServer(asynctest.TestCase):
         # telstate.get is rigged to return certain known values.
         # Note: this is fragile, and should maybe be replaced by the fakeredis
         # telstate in future.
-        self._telstate.add(
-            'i0_antenna_channelised_voltage_instrument_dev_name', 'i0', immutable=True)
+        self._telstate['i0_antenna_channelised_voltage_instrument_dev_name'] = 'i0'
         for stream in ['i0_baseline_correlation_products',
                        'i0_tied_array_channelised_voltage_0x',
                        'i0_tied_array_channelised_voltage_0y']:
-            self._telstate.view(stream).add(
-                'src_streams', ['i0_antenna_channelised_voltage'], immutable=True)
+            self._telstate.view(stream)['src_streams'] = ['i0_antenna_channelised_voltage']
 
         port = 7147
         self._server = server.SimulatorServer(

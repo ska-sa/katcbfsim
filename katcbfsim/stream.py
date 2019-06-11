@@ -558,7 +558,7 @@ class CBFStream(Stream):
             src = 'katcbfsim_antenna_channelised_voltage_{}'.format(self.name_norm)
             logger.warning('No src_streams found for %s, so defining stream %s',
                            self.name_norm, src)
-            stream_view.add('src_streams', [src], immutable=True)
+            stream_view['src_streams'] = [src]
         else:
             src = srcs[0]
         src_view = telstate.view(src, exclusive=True)
@@ -567,7 +567,7 @@ class CBFStream(Stream):
             instrument = 'katcbfsim_instrument_{}'.format(src)
             logger.warning('No instrument_dev_name found for %s, so defining %s',
                            src, instrument)
-            src_view.add('instrument_dev_name', instrument, immutable=True)
+            src_view['instrument_dev_name'] = instrument
         self._instrument_sensors(telstate.view(instrument, exclusive=True))
         self._antenna_channelised_voltage_sensors(src_view)
 
