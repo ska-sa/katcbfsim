@@ -70,7 +70,7 @@ def prepare_server(server, args):
         antenna = katpoint.Antenna(descr)
         server.add_antenna(antenna)
         if add_to_telstate and args.telstate is not None:
-            args.telstate.add(antenna.name + '_observer', antenna.description, immutable=True)
+            args.telstate[args.telstate.join(antenna.name, 'observer')] = antenna.description
 
     # Do the fake ones first, so that real values can replace them
     if args.antenna_mask is not None:
