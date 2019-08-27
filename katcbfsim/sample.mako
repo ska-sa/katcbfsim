@@ -22,6 +22,22 @@ DEVICE_FN int2 to_int(cplex a)
 #endif
 }
 
+DEVICE_FN int2 to_big_endian(int2 a)
+{
+#ifdef __OPENCL_VERSION__
+# error "Not yet implemented for OpenCL"
+#else
+    /* The CUDA programming guide says "The NVIDIA GPU architecture uses a
+     * little-endian representation," so there is no need to check the
+     * endianness.
+     */
+    int2 out;
+    out.x = __byte_perm(a.x, 0, 0x0123);
+    out.y = __byte_perm(a.y, 0, 0x0123);
+    return out;
+#endif
+}
+
 typedef union
 {
     jones in;
@@ -140,7 +156,7 @@ KERNEL void sample(
         ijones quant;
         for (int i = 0; i < 2; i++)
             for (int j = 0; j < 2; j++)
-                quant.m[i][j] = to_int(sample.m[i][j]);
+                quant.m[i][j] = to_big_endian(to_int(sample.m[i][j]));
         data[data_idx].out = quant;
     }
 }

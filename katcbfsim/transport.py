@@ -190,7 +190,7 @@ class FXSpeadTransport(CBFSpeadTransport):
             '(n_bls given by SPEAD Id=0x1008). '
             'Each value is a complex number - two (real and imaginary) signed integers.',
             (self.stream.n_channels // self.stream.n_substreams, self.stream.n_baselines * 4, 2),
-            np.int32)
+            np.dtype('>i4'))
 
     async def send(self, vis, dump_index):
         if (dump_index - self._last_metadata) * self.stream.accumulation_length >= 5.0:
