@@ -31,5 +31,5 @@ six
 spead2
 katpoint @ git+https://git@github.com/ska-sa/katpoint
 katsdpservices @ git+https://git@github.com/ska-sa/katsdpservices
-katsdpsigproc @ git+https://git@github.com/ska-sa/katsdpsigproc[CUDA]
+katsdpsigproc[CUDA] @ git+https://git@github.com/ska-sa/katsdpsigproc
 katsdptelstate @ git+https://git@github.com/ska-sa/katsdptelstate
