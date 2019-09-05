@@ -29,7 +29,7 @@ redis
 scipy
 six
 spead2
-git+ssh://git@github.com/ska-sa/katpoint#egg=katpoint
-git+ssh://git@github.com/ska-sa/katsdptelstate#egg=katsdptelstate
-git+ssh://git@github.com/ska-sa/katsdpservices#egg=katsdpservices
-git+ssh://git@github.com/ska-sa/katsdpsigproc#egg=katsdpsigproc[CUDA]
+katpoint @ git+https://git@github.com/ska-sa/katpoint
+katsdpservices @ git+https://git@github.com/ska-sa/katsdpservices
+katsdpsigproc[CUDA] @ git+https://git@github.com/ska-sa/katsdpsigproc
+katsdptelstate @ git+https://git@github.com/ska-sa/katsdptelstate
