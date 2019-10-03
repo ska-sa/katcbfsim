@@ -8,4 +8,4 @@ katsdp.setDependencies([
     'ska-sa/katsdptelstate/master',
     'ska-sa/katsdpdockerbase/master'])
 katsdp.standardBuild(cuda: true, python3: true, python2: false)
-katsdp.mail('bmerry@ska.ac.za')
+katsdp.mail('sdpdev+katcbfsim@ska.ac.za')
