@@ -1,5 +1,6 @@
-FROM sdp-docker-registry.kat.ac.za:5000/docker-base-gpu-build as build
-MAINTAINER Bruce Merry "bmerry@ska.ac.za"
+ARG KATSDPDOCKERBASE_REGISTRY=sdp-docker-registry.kat.ac.za:5000
+
+FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-gpu-build as build
 
 # Enable Python 3 environment
 ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
@@ -19,8 +20,8 @@ RUN python -c 'import katcbfsim; print("Successful import")'
 
 #######################################################################
 
-FROM sdp-docker-registry.kat.ac.za:5000/docker-base-gpu-runtime
-MAINTAINER Bruce Merry "bmerry@ska.ac.za"
+FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-gpu-runtime
+LABEL maintainer="sdpdev+katcbfsim@ska.ac.za"
 
 # Install from the build stage
 COPY --from=build --chown=kat:kat /home/kat/ve3 /home/kat/ve3

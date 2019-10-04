@@ -5,8 +5,8 @@ from setuptools import setup, find_packages
 tests_require = ['nose', 'scipy', 'mock', 'asynctest']
 
 setup(
-    author='Bruce Merry',
-    author_email='bmerry@ska.ac.za',
+    author='MeerKAT SDP Team',
+    author_email='sdpdev+katcbfsim@ska.ac.za',
     name='katcbfsim',
     package_data={'': ['*.mako']},
     include_package_data=True,
