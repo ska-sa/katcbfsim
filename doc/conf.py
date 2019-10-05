@@ -53,8 +53,8 @@ master_doc = 'index'
 
 # General information about the project.
 project = u'katcbfsim'
-copyright = u'2015, Bruce Merry'
-author = u'Bruce Merry'
+copyright = u'2015-2019, National Research Foundation'
+author = u'MeerKAT SDP Team'
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
