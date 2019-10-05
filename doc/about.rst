@@ -88,7 +88,7 @@ There are several ways to run a simulation, which can also be mixed.
 
 5. Using katcbfsim as a library.
 
-.. _katcp: https://pythonhosted.org/katcp/
+.. _katcp: https://katcp-python.readthedocs.io/en/v0.6.4/_downloads/bff0f2ba64c586770b519594f52b1ab7/NRF-KAT7-6.0-IFCE-002-Rev5.pdf
 .. _katsdptelstate: https://github.com/ska-sa/katsdptelstate
 
 The configuration is split into information describing the virtual world
@@ -99,23 +99,25 @@ streams, the per-stream commands all take a stream name.
 The world information needed is:
 
 - The antennas. Each is given by a string that can be parsed by
-  :class:`katpoint.Antenna`.
+  :class:`katpoint.Antenna <katpoint.antenna.Antenna>`.
 
 - The point sources. Each is given by a string that can be parsed by
-  :class:`katpoint.Target`, and should include a flux model. The source is
-  ignored for frequencies outside the support of the flux model. If no flux
-  model is given, 1 Jy is assumed at all frequencies. If no sources are given,
-  a point source is simulated at the initial phase centre.
+  :class:`katpoint.Target <katpoint.target.Target>`, and should include a flux
+  model. The source is ignored for frequencies outside the support of the flux
+  model. If no flux model is given, 1 Jy is assumed at all frequencies. If no
+  sources are given, a point source is simulated at the initial phase centre.
 
 - The sync time, as a UNIX timestamp. This is the start time of the first
   dump, and also the time reported as the `sync_time` in the SPEAD metadata.
 
 - The target, i.e., phase centre. This is also a string that can be parsed by
-  :class:`katpoint.Target`. This can be changed over time.
+  :class:`katpoint.Target <katpoint.target.Target>`. This can be changed over
+  time.
 
 - The pointing direction, used for the primary beam model. Like the target,
-  this is a :class:`katpoint.Target` string and can be changed over time. If
-  it is never specified, it defaults to being the same as the target.
+  this is a :class:`katpoint.Target <katpoint.target.Target>` string and can be
+  changed over time. If it is never specified, it defaults to being the same as
+  the target.
 
 - A gain (scaling factor between flux densities and counts). Generated values
   in Jansky are converted to output values by scaling by this gain. It is
