@@ -19,7 +19,7 @@ import shlex
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
-#sys.path.insert(0, os.path.abspath('.'))
+sys.path.insert(0, os.path.abspath('..'))
 
 # -- General configuration ------------------------------------------------
 
@@ -33,7 +33,8 @@ extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.todo',
     'sphinx.ext.mathjax',
-    'sphinx.ext.napoleon'
+    'sphinx.ext.napoleon',
+    'sphinx.ext.intersphinx'
 ]
 
 # Add any paths that contain templates here, relative to this directory.
@@ -52,8 +53,8 @@ master_doc = 'index'
 
 # General information about the project.
 project = u'katcbfsim'
-copyright = u'2015, Bruce Merry'
-author = u'Bruce Merry'
+copyright = u'2015-2019, National Research Foundation'
+author = u'MeerKAT SDP Team'
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -107,6 +108,12 @@ pygments_style = 'sphinx'
 
 # If true, `todo` and `todoList` produce output, else they produce nothing.
 todo_include_todos = True
+
+
+intersphinx_mapping = {
+    'katsdptelstate': ('https://katsdptelstate.readthedocs.io/en/latest', None),
+    'katpoint': ('https://katpoint.readthedocs.io/en/latest', None)
+}
 
 
 # -- Options for HTML output ----------------------------------------------
