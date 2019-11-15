@@ -29,6 +29,7 @@ redis
 scipy
 six
 spead2
+typing_extensions
 katpoint @ git+https://github.com/ska-sa/katpoint
 katsdpservices @ git+https://github.com/ska-sa/katsdpservices
 katsdpsigproc[CUDA] @ git+https://github.com/ska-sa/katsdpsigproc
