@@ -4,9 +4,7 @@ async-timeout
 decorator
 fakeredis
 future
-futures
 h5py
-ipaddress
 katversion
 llvmlite
 Mako
@@ -16,7 +14,6 @@ netifaces
 numba
 numpy
 pandas
-pkginfo
 py
 pycuda
 pyephem
