@@ -2,6 +2,7 @@ aiokatcp
 appdirs
 async-timeout
 decorator
+ephem
 future
 h5py
 katversion
