@@ -1,9 +1,3 @@
-argparse       # required by unittest2
-asynctest==0.10.0
+asynctest
 coverage
-linecache2     # required by unittest2
-mock           # required by katsdpsigproc.test
 nose
-pbr            # required by mock
-traceback2     # required by unittest2
-unittest2      # required by katsdpsigproc.test
