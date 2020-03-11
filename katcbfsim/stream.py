@@ -579,6 +579,15 @@ class CBFStream(Stream):
             src_view['instrument_dev_name'] = instrument
         self._instrument_sensors(telstate.view(instrument, exclusive=True))
         self._antenna_channelised_voltage_sensors(src_view)
+        # This is a subarray-level sensor so not really the domain of
+        # katcbfsim, but there isn't another good place to put it.
+        if 544e6 <= self.center_frequency <= 1088e6:
+            band = 'u'
+        elif 856e6 <= self.center_frequency <= 1712e6:
+            band = 'l'
+        else:
+            band = 's'
+        self.sensor(telstate.view('sub'), 'band', band)
 
 
 class FXStream(CBFStream):
