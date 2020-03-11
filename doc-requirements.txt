@@ -14,6 +14,12 @@ pytz
 requests
 snowballstemmer
 Sphinx
+sphinxcontrib-applehelp
+sphinxcontrib-devhelp
+sphinxcontrib-htmlhelp
+sphinxcontrib-jsmath
+sphinxcontrib-qthelp
+sphinxcontrib-serializinghtml
 sphinxcontrib-websupport
 sphinx-rtd-theme
 urllib3
