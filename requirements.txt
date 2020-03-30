@@ -2,7 +2,7 @@ aiokatcp
 appdirs
 async-timeout
 decorator
-fakeredis
+ephem
 future
 h5py
 katversion
@@ -14,11 +14,9 @@ netifaces
 numba
 numpy
 pandas
-py
 pycuda
 pyephem
 pygelf
-pytest
 python-dateutil
 pytools
 pytz
