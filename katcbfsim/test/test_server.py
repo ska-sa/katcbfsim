@@ -188,11 +188,11 @@ class TestSimulationServer(asynctest.TestCase):
 
     def _check_attribute(self, telstate, key, value):
         assert_equal(telstate.get(key), value)
-        assert_true(telstate.is_immutable(key))
+        assert_equal(telstate.key_type(key), katsdptelstate.KeyType.IMMUTABLE)
 
     def _check_sensor(self, telstate, key, value):
         assert_equal(telstate.get(key), value)
-        assert_false(telstate.is_immutable(key))
+        assert_equal(telstate.key_type(key), katsdptelstate.KeyType.MUTABLE)
 
     def _check_common_telstate(self):
         instrument_view = self._telstate.view('i0', exclusive=True)
