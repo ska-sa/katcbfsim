@@ -544,15 +544,6 @@ class CBFStream(Stream):
         self.sensor(view, 'n_chans', self.n_channels)
         self.sensor(view, 'ticks_between_spectra',
                     int(round(self.n_channels * self.scale_factor_timestamp / self.bandwidth)))
-        # These are actually CAM subarray proxy sensors, but they go to the
-        # same place in telstate.
-        channel_mask = np.zeros((3, self.n_channels), np.bool_)
-        edge = max(1, int(0.05 * self.n_channels))
-        channel_mask[:, :edge] = True
-        channel_mask[:, -edge:] = True
-        channel_mask[1, int(0.3 * self.n_channels) : int(0.4 * self.n_channels)] = True
-        self.sensor(view, 'channel_mask', channel_mask, immutable=False)
-        self.sensor(view, 'channel_mask_max_baseline_lengths', [1.0, 1000.0])
 
     def set_telstate(self, telstate):
         """Populate telstate with simulated sensors for the stream.
