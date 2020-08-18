@@ -544,15 +544,6 @@ class CBFStream(Stream):
         self.sensor(view, 'n_chans', self.n_channels)
         self.sensor(view, 'ticks_between_spectra',
                     int(round(self.n_channels * self.scale_factor_timestamp / self.bandwidth)))
-        # These are actually CAM subarray proxy sensors, but they go to the
-        # same place in telstate.
-        channel_mask = np.zeros((3, self.n_channels), np.bool_)
-        edge = max(1, int(0.05 * self.n_channels))
-        channel_mask[:, :edge] = True
-        channel_mask[:, -edge:] = True
-        channel_mask[1, int(0.3 * self.n_channels) : int(0.4 * self.n_channels)] = True
-        self.sensor(view, 'channel_mask', channel_mask, immutable=False)
-        self.sensor(view, 'channel_mask_max_baseline_lengths', [1.0, 1000.0])
 
     def set_telstate(self, telstate):
         """Populate telstate with simulated sensors for the stream.
@@ -579,15 +570,6 @@ class CBFStream(Stream):
             src_view['instrument_dev_name'] = instrument
         self._instrument_sensors(telstate.view(instrument, exclusive=True))
         self._antenna_channelised_voltage_sensors(src_view)
-        # This is a subarray-level sensor so not really the domain of
-        # katcbfsim, but there isn't another good place to put it.
-        if 544e6 <= self.center_frequency <= 1088e6:
-            band = 'u'
-        elif 856e6 <= self.center_frequency <= 1712e6:
-            band = 'l'
-        else:
-            band = 's'
-        self.sensor(telstate.view('sub'), 'band', band)
 
 
 class FXStream(CBFStream):
