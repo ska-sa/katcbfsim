@@ -385,7 +385,7 @@ class SimulatorServer(aiokatcp.DeviceServer):
         self.configure_subarray_from_telstate(antenna_names=antenna_names)
 
     async def send_metadata(self, stream):
-        await asyncio.ensure_future(stream.send_metadata(), loop=stream.loop)
+        await asyncio.ensure_future(stream.send_metadata())
 
     @_stream_exceptions
     @_stream_request

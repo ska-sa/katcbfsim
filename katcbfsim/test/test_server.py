@@ -89,7 +89,7 @@ class TestSimulationServer(asynctest.TestCase):
 
         port = 7147
         self._server = server.SimulatorServer(
-            context, None, telstate=self._telstate, host='127.0.0.1', port=port, loop=self.loop)
+            context, None, telstate=self._telstate, host='127.0.0.1', port=port)
         return port
 
     async def setUp(self):
@@ -97,7 +97,7 @@ class TestSimulationServer(asynctest.TestCase):
         await self._server.start()
         self.addCleanup(self._server.stop)
         self._reader, self._writer = \
-            await asyncio.open_connection('127.0.0.1', port, loop=self.loop)
+            await asyncio.open_connection('127.0.0.1', port)
         self._mid = 1
 
     async def tearDown(self):

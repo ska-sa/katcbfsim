@@ -257,8 +257,6 @@ class Stream(object):
         Subarray corresponding to this stream
     name : str
         Name for this stream (used by katcp)
-    loop : :class:`asyncio.BaseEventLoop`, optional
-        Event loop for coroutines
 
     Attributes
     ----------
@@ -281,10 +279,8 @@ class Stream(object):
         the capture coroutine terminates earlier.
     start_time : :class:`katpoint.Timestamp`
         Simulated time for the start of the capture.
-    loop : :class:`asyncio.BaseEventLoop`
-        Event loop for coroutines
     """
-    def __init__(self, subarray, name, loop=None):
+    def __init__(self, subarray, name):
         self._capture_future = None
         self._stop_future = None
         self.name = name
@@ -292,10 +288,6 @@ class Stream(object):
         self.subarray = subarray
         self.start_time = None
         self.transport_factories = []
-        if loop is None:
-            self.loop = asyncio.get_event_loop()
-        else:
-            self.loop = loop
         self._last_warn_behind = 0
         self.subarray.streams += 1
 
@@ -344,9 +336,9 @@ class Stream(object):
         self.subarray.capturing += 1
         self.start_time = start_time
         # Create a future that is set by capture_stop
-        self._stop_future = asyncio.Future(loop=self.loop)
+        self._stop_future = asyncio.Future()
         # Start the capture coroutine on the event loop
-        self._capture_future = asyncio.ensure_future(self._capture(), loop=self.loop)
+        self._capture_future = asyncio.ensure_future(self._capture())
 
     async def capture_stop(self):
         """Request an end to data capture, and wait for capture to complete.
@@ -379,7 +371,7 @@ class Stream(object):
         try:
             transports = [factory(self) for factory in self.transport_factories]
             futures = [t.send_metadata() for t in transports]
-            await asyncio.gather(*futures, loop=self.loop)
+            await asyncio.gather(*futures)
         finally:
             for t in transports:
                 await t.close()
@@ -400,7 +392,7 @@ class Stream(object):
             If true, then :meth:`capture_stop` was called.
         """
         try:
-            now = self.loop.time()
+            now = asyncio.get_event_loop().time()
             if now > wall_time:
                 if now - self._last_warn_behind >= 1:
                     logger.warn('Falling behind the requested rate by %f seconds', now - wall_time)
@@ -408,7 +400,7 @@ class Stream(object):
             else:
                 logger.debug('Sleeping for %f seconds', wall_time - now)
                 self._last_warn_behind = 0
-            await resource.wait_until(asyncio.shield(self._stop_future), wall_time, self.loop)
+            await resource.wait_until(asyncio.shield(self._stop_future), wall_time)
         except asyncio.TimeoutError:
             # This is the normal case: time for the next dump to be transmitted
             stopped = False
@@ -438,8 +430,6 @@ class CBFStream(Stream):
     n_substreams : int, optional
         Number of substreams (X/B-engines). If not specified, a default
         will be computed to match the MeerKAT CBF.
-    loop : :class:`asyncio.BaseEventLoop`, optional
-        Event loop for coroutines
 
     Attributes
     ----------
@@ -471,10 +461,10 @@ class CBFStream(Stream):
         - the number of substreams is not divisible by the number of servers
     """
     def __init__(self, subarray, name, adc_rate, center_frequency, bandwidth,
-                 n_channels, n_substreams=None, loop=None):
+                 n_channels, n_substreams=None):
         if not subarray.antennas:
             raise ConfigError('no antennas defined')
-        super(CBFStream, self).__init__(subarray, name, loop)
+        super(CBFStream, self).__init__(subarray, name)
         self.adc_rate = adc_rate
         self.center_frequency = center_frequency
         self.bandwidth = bandwidth
@@ -598,8 +588,6 @@ class FXStream(CBFStream):
     accumulation_length : float
         Approximate simulated integration time in seconds. It will be rounded
         to the nearest supported value.
-    loop : :class:`asyncio.BaseEventLoop`, optional
-        Event loop for coroutines
 
     Attributes
     ----------
@@ -617,9 +605,9 @@ class FXStream(CBFStream):
     """
     def __init__(self, context, subarray, name, adc_rate,
                  center_frequency, bandwidth, n_channels, n_substreams,
-                 accumulation_length=None, loop=None):
+                 accumulation_length=None):
         super(FXStream, self).__init__(subarray, name, adc_rate, center_frequency,
-                                       bandwidth, n_channels, n_substreams, loop)
+                                       bandwidth, n_channels, n_substreams)
         self.context = context
         if accumulation_length is None:
             accumulation_length = 0.5
@@ -777,7 +765,7 @@ class FXStream(CBFStream):
                 data_a.ready([transfer_event])
                 io_queue_a.ready()
                 # Wait for the transfer to complete
-                await resource.async_wait_for_events([transfer_event], loop=self.loop)
+                await resource.async_wait_for_events([transfer_event])
                 logger.debug('Dump %d: transfer to host complete, waiting for transport', index)
 
                 # Send the data
@@ -802,25 +790,26 @@ class FXStream(CBFStream):
         # the separate simulators to desynchronise. We instead estimate a
         # reasonable bound on the startup time and add that, so that we don't
         # start out with a flurry of "falling behind" messages.
-        wall_time = self.loop.time() + 20
+        loop = asyncio.get_event_loop()
+        wall_time = loop.time() + 20
         # Futures corresponding to _run_dump coroutine calls
         dump_futures = collections.deque()
         transports = []
         try:
             transports = [factory(self) for factory in self.transport_factories]
-            predict, data, host = await self.loop.run_in_executor(None, self._make_predict)
+            predict, data, host = await loop.run_in_executor(None, self._make_predict)
             index = 0
-            predict_r = resource.Resource(predict, loop=self.loop)
-            io_queue_r = resource.Resource(self.context.create_command_queue(), loop=self.loop)
-            data_r = [resource.Resource(x, loop=self.loop) for x in data]
-            host_r = [resource.Resource(x, loop=self.loop) for x in host]
-            transports_r = resource.Resource(transports, loop=self.loop)
+            predict_r = resource.Resource(predict)
+            io_queue_r = resource.Resource(self.context.create_command_queue())
+            data_r = [resource.Resource(x) for x in data]
+            host_r = [resource.Resource(x) for x in host]
+            transports_r = resource.Resource(transports)
             if self.subarray.n_servers > 1:
                 logger.info('waiting for start time')
                 await self.wait_for_next(wall_time)
             else:
                 # No need to wait, we don't have anyone to sync with
-                wall_time = self.loop.time()
+                wall_time = loop.time()
             logger.info('simulation starting')
             for transport in transports:
                 await transport.send_metadata()
@@ -837,7 +826,7 @@ class FXStream(CBFStream):
                 logger.debug('Dump %d: waiting for predictor', index)
                 await predict_a.wait_events()
                 logger.debug('Dump %d: predictor ready', index)
-                future = self.loop.create_task(
+                future = loop.create_task(
                     self._run_dump(index, predict_a, data_a, host_a, transports_a, io_queue_a))
                 dump_futures.append(future)
                 # Sleep until either it is time to make the next dump, or we are asked
@@ -916,8 +905,6 @@ class BeamformerStream(CBFStream):
     sample_bits : int
         Number of bits per output sample (for each of real and imag). Currently
         this must be 8, 16 or 32.
-    loop : :class:`asyncio.BaseEventLoop`, optional
-        Event loop for coroutines
 
     Attributes
     ----------
@@ -935,10 +922,10 @@ class BeamformerStream(CBFStream):
         Equivalent to :attr:`interval`, but in wall-clock time
     """
     def __init__(self, subarray, name, adc_rate, center_frequency, bandwidth,
-                 n_channels, n_substreams, timesteps, sample_bits, loop=None):
+                 n_channels, n_substreams, timesteps, sample_bits):
         super(BeamformerStream, self).__init__(
             subarray, name, adc_rate, center_frequency, bandwidth,
-            n_channels, n_substreams, loop)
+            n_channels, n_substreams)
         self.timesteps = timesteps
         self.sample_bits = sample_bits
         if sample_bits == 8:
@@ -976,18 +963,19 @@ class BeamformerStream(CBFStream):
         """
         transports = None
         dump_futures = collections.deque()
+        loop = asyncio.get_event_loop()
         try:
             transports = [factory(self) for factory in self.transport_factories]
             for transport in transports:
                 await transport.send_metadata()
             index = 0
-            wall_time = self.loop.time()
+            wall_time = loop.time()
             while self.n_dumps is None or index < self.n_dumps:
                 while len(dump_futures) > 3:
                     await dump_futures[0]
                     dump_futures.popleft()
                 future = asyncio.ensure_future(
-                    self._run_dump(transports, index), loop=self.loop)
+                    self._run_dump(transports, index))
                 dump_futures.append(future)
                 wall_time += self.wall_interval
                 stopped = await self.wait_for_next(wall_time)

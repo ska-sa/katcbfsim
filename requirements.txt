@@ -23,7 +23,7 @@ pytz
 redis
 scipy
 six
-spead2
+spead2==3.0.0
 typing_extensions
 katpoint @ git+https://github.com/ska-sa/katpoint
 katsdpservices @ git+https://github.com/ska-sa/katsdpservices
