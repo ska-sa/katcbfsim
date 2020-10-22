@@ -8,6 +8,7 @@ import time
 from katsdpsigproc import accel
 import katsdptelstate
 import katsdpservices
+from katsdpservices.aiomonitor import add_aiomonitor_arguments, start_aiomonitor
 import katpoint
 
 import katcbfsim.server
@@ -237,6 +238,7 @@ def main():
     parser.add_argument(
         '--log-level', '-l', default='INFO',
         help='logging level [%(default)s]')
+    add_aiomonitor_arguments(parser)
     args = parser.parse_args()
     if args.start and args.create_fx_stream is None and args.create_beamformer_stream is None:
         parser.error('--start requires --create-fx-stream or --create-beamformer-stream')
@@ -260,8 +262,12 @@ def main():
     server = katcbfsim.server.SimulatorServer(
         context, subarray, telstate=args.telstate, host=args.host, port=args.port)
     prepare_server(server, args)
-    asyncio.get_event_loop().run_until_complete(run_server(server))
-    asyncio.get_event_loop().close()
+    loop = asyncio.get_event_loop()
+    with start_aiomonitor(loop, args, locals=locals()):
+        try:
+            loop.run_until_complete(run_server(server))
+        finally:
+            loop.close()
 
 
 if __name__ == '__main__':

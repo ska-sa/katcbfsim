@@ -1,4 +1,6 @@
+aioconsole
 aiokatcp
+aiomonitor
 appdirs
 async-timeout
 decorator
@@ -24,6 +26,7 @@ redis
 scipy
 six
 spead2==3.0.0
+terminaltables
 typing_extensions
 katpoint @ git+https://github.com/ska-sa/katpoint
 katsdpservices @ git+https://github.com/ska-sa/katsdpservices
