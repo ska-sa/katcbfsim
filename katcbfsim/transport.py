@@ -70,7 +70,7 @@ class SpeadTransport(object):
         for i in range(first_substream, last_substream):
             e = endpoints[i * len(endpoints) // stream.n_substreams]
             if ibv:
-                sender = spead2.send.asyncio.UdpStream(
+                sender = spead2.send.asyncio.UdpIbvStream(
                     spead2.ThreadPool(),
                     config,
                     spead2.send.UdpIbvConfig(
