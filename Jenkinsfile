@@ -6,6 +6,7 @@ katsdp.setDependencies([
     'ska-sa/katpoint/master',
     'ska-sa/katsdpservices/master',
     'ska-sa/katsdptelstate/master',
-    'ska-sa/katsdpdockerbase/master'])
-katsdp.standardBuild(cuda: true, python3: true, python2: false)
+    'ska-sa/katsdpdockerbase/new-rdma-core'])
+katsdp.standardBuild(cuda: true, python3: true, python2: false,
+                     katsdpdockerbase_ref: 'new-rdma-core')
 katsdp.mail('sdpdev+katcbfsim@ska.ac.za')
