@@ -1,6 +1,6 @@
 ARG KATSDPDOCKERBASE_REGISTRY=sdp-docker-registry.kat.ac.za:5000
 
-FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-gpu-build:new-rdma-core as build
+FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-gpu-build as build
 
 # Enable Python 3 environment
 ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
@@ -20,7 +20,7 @@ RUN python -c 'import katcbfsim; print("Successful import")'
 
 #######################################################################
 
-FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-gpu-runtime:new-rdma-core
+FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-gpu-runtime
 LABEL maintainer="sdpdev+katcbfsim@ska.ac.za"
 
 # Install from the build stage
