@@ -2,7 +2,6 @@
 
 import logging
 import asyncio
-from collections import namedtuple
 
 import numpy as np
 import h5py
@@ -35,7 +34,15 @@ class EndpointFactory(object):
                         self.max_packet_size, stream)
 
 
-Substream = namedtuple('Substream', ['sender', 'endpoint', 'channel_range'])
+class Substream:
+    def __init__(self, sender, endpoint, channel_range, index):
+        self.sender = sender
+        self.endpoint = endpoint
+        self.channel_range = channel_range
+        self.index = index
+
+    async def async_send_heap(self, heap):
+        return await self.sender.async_send_heap(heap, substream_index=self.index)
 
 
 class SpeadTransport(object):
@@ -44,53 +51,65 @@ class SpeadTransport(object):
     def factory(cls, endpoints, ifaddr, ibv, max_packet_size):
         return EndpointFactory(cls, endpoints, ifaddr, ibv, max_packet_size)
 
-    @property
-    def n_endpoints(self):
-        return len(self.endpoints)
-
     def __init__(self, endpoints, ifaddr, ibv, max_packet_size, stream, in_rate):
         if not endpoints:
             raise ValueError('At least one endpoint is required')
-        n = len(endpoints)
-        if stream.n_substreams % n:
+        if stream.n_substreams % len(endpoints):
             raise ValueError('Number of substreams not divisible by number of endpoints')
-        self.endpoints = list(endpoints)
+        server_id = stream.subarray.server_id
+        n_servers = stream.subarray.n_servers
+        first_substream = stream.n_substreams * server_id // n_servers
+        last_substream = stream.n_substreams * (server_id + 1) // n_servers
+        my_n_substreams = last_substream - first_substream
         self.stream = stream
         self._flavour = spead2.Flavour(4, 64, 48, 0)
         self._inline_format = [('u', self._flavour.heap_address_bits)]
         # Send at a slightly higher rate, to account for overheads, and so
         # that if the sender sends a burst we can catch up with it.
-        out_rate = in_rate * 1.1 / stream.n_substreams
-        config = spead2.send.StreamConfig(rate=out_rate, max_packet_size=max_packet_size)
-        self._substreams = []
-        server_id = stream.subarray.server_id
-        n_servers = stream.subarray.n_servers
-        first_substream = stream.n_substreams * server_id // n_servers
-        last_substream = stream.n_substreams * (server_id + 1) // n_servers
-        for i in range(first_substream, last_substream):
-            e = endpoints[i * len(endpoints) // stream.n_substreams]
-            if ibv:
-                sender = spead2.send.asyncio.UdpIbvStream(
-                    spead2.ThreadPool(),
-                    config,
-                    spead2.send.UdpIbvConfig(
-                        endpoints=[(e.host, e.port)],
-                        interface_address=ifaddr,
-                        ttl=4           # For MeerKAT layer 3 switching
-                    )
+        out_rate = in_rate * 1.1 / stream.n_substreams * my_n_substreams
+        config = spead2.send.StreamConfig(
+            max_heaps=my_n_substreams,
+            rate=out_rate,
+            max_packet_size=max_packet_size)
+        my_endpoints = [
+            endpoints[i * len(endpoints) // stream.n_substreams]
+            for i in range(first_substream, last_substream)
+        ]
+        # spead2 takes a tuple, not an Endpoint object
+        spead2_endpoints = [
+            (endpoint.host, endpoint.port)
+            for endpoint in my_endpoints
+        ]
+        if ibv:
+            sender = spead2.send.asyncio.UdpIbvStream(
+                spead2.ThreadPool(),
+                config,
+                spead2.send.UdpIbvConfig(
+                    endpoints=spead2_endpoints,
+                    interface_address=ifaddr,
+                    ttl=4           # For MeerKAT layer 3 switching
                 )
-            else:
-                kwargs = {}
-                if ifaddr is not None:
-                    kwargs['interface_address'] = ifaddr
-                    kwargs['ttl'] = 4   # For MeerKAT layer 3 switching
-                sender = spead2.send.asyncio.UdpStream(
-                    spead2.ThreadPool(), [(e.host, e.port)], config, **kwargs)
-            channel0 = i * stream.n_channels // stream.n_substreams
-            channel1 = (i + 1) * stream.n_channels // stream.n_substreams
-            self._substreams.append(Substream(
-                sender=sender, endpoint=e, channel_range=slice(channel0, channel1)))
-            self._substreams[-1].sender.set_cnt_sequence(i, stream.n_substreams)
+            )
+        else:
+            kwargs = {}
+            if ifaddr is not None:
+                kwargs['interface_address'] = ifaddr
+                kwargs['ttl'] = 4   # For MeerKAT layer 3 switching
+            sender = spead2.send.asyncio.UdpStream(
+                spead2.ThreadPool(), spead2_endpoints, config, **kwargs)
+        sender.set_cnt_sequence(server_id, n_servers)
+        self._substreams = [
+            Substream(
+                sender=sender,
+                endpoint=endpoint,
+                channel_range=slice(
+                    i * stream.n_channels // stream.n_substreams,
+                    (i + 1) * stream.n_channels // stream.n_substreams
+                ),
+                index=i - first_substream
+            )
+            for i, endpoint in zip(range(first_substream, last_substream), my_endpoints)
+        ]
 
     async def close(self):
         # This is to ensure that the end packet won't be dropped for lack of
@@ -102,7 +121,7 @@ class SpeadTransport(object):
             if substream.endpoint != prev_endpoint:
                 heap = self.ig_data.get_end()
                 await substream.sender.async_flush()
-                await substream.sender.async_send_heap(heap)
+                await substream.async_send_heap(heap)
                 prev_endpoint = substream.endpoint
 
 
@@ -130,12 +149,12 @@ class CBFSpeadTransport(SpeadTransport):
             'Can be used to reconstruct the full spectrum.',
             (), None, format=self._inline_format)
 
-    async def _send_metadata_endpoint(self, sender, start):
+    async def _send_metadata_endpoint(self, substream, start):
         """Reissue all the metadata on the stream (for one endpoint)."""
         heap = self.ig_data.get_heap(descriptors='all', data='none')
-        await sender.async_send_heap(heap)
+        await substream.async_send_heap(heap)
         if start:
-            await sender.async_send_heap(self.ig_data.get_start())
+            await substream.async_send_heap(self.ig_data.get_start())
 
     async def send_metadata(self, start=True):
         """Reissue all the metadata on the stream."""
@@ -145,7 +164,7 @@ class CBFSpeadTransport(SpeadTransport):
         for substream in self._substreams:
             if substream.endpoint != prev_endpoint:
                 futures.append(asyncio.ensure_future(
-                    self._send_metadata_endpoint(substream.sender, start=start)))
+                    self._send_metadata_endpoint(substream, start=start)))
                 prev_endpoint = substream.endpoint
         await asyncio.gather(*futures)
 
@@ -180,13 +199,13 @@ class FXSpeadTransport(CBFSpeadTransport):
         assert vis.flags.c_contiguous, 'Visibility array must be contiguous'
         shape = (-1, self.stream.n_baselines * 4, 2)
         vis_view = vis.reshape(*shape)
-        futures = []
         timestamp = int(dump_index * self.stream.n_accs * self.stream.n_channels
                         * self.stream.scale_factor_timestamp / self.stream.bandwidth)
         timestamp += self.stream.start_timestamp
         # Truncate timestamp to the width of the field it is in
         timestamp = timestamp & ((1 << self._flavour.heap_address_bits) - 1)
         offset = self._substreams[0].channel_range.start
+        heap_refs = []
         for substream in self._substreams:
             c0 = substream.channel_range.start - offset
             c1 = substream.channel_range.stop - offset
@@ -195,8 +214,9 @@ class FXSpeadTransport(CBFSpeadTransport):
             self.ig_data['frequency'].value = substream.channel_range.start
             heap = self.ig_data.get_heap()
             heap.repeat_pointers = True
-            futures.append(asyncio.ensure_future(substream.sender.async_send_heap(heap)))
-        await asyncio.gather(*futures)
+            heap_refs.append(spead2.send.HeapReference(heap=heap, substream_index=substream.index))
+        await self._substreams[0].sender.async_send_heaps(
+            heap_refs, mode=spead2.send.GroupMode.ROUND_ROBIN)
 
 
 class FileFactory(object):
@@ -274,8 +294,8 @@ class BeamformerSpeadTransport(CBFSpeadTransport):
         timestamp += self.stream.start_timestamp
         # Truncate timestamp to the width of the field it is in
         timestamp = timestamp & ((1 << self._flavour.heap_address_bits) - 1)
-        futures = []
         offset = self._substreams[0].channel_range.start
+        heap_refs = []
         for substream in self._substreams:
             c0 = substream.channel_range.start - offset
             c1 = substream.channel_range.stop - offset
@@ -284,5 +304,6 @@ class BeamformerSpeadTransport(CBFSpeadTransport):
             self.ig_data['frequency'].value = substream.channel_range.start
             heap = self.ig_data.get_heap()
             heap.repeat_pointers = True
-            futures.append(substream.sender.async_send_heap(heap))
-        await asyncio.gather(*futures)
+            heap_refs.append(spead2.send.HeapReference(heap=heap, substream_index=substream.index))
+        await self._substreams[0].sender.async_send_heaps(
+            heap_refs, mode=spead2.send.GroupMode.ROUND_ROBIN)
