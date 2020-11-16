@@ -108,7 +108,7 @@ class SpeadTransport(object):
                 ),
                 index=i - first_substream
             )
-            for i, endpoint in zip(range(first_substream, last_substream), my_endpoints)
+            for i, endpoint in enumerate(my_endpoints, start=first_substream)
         ]
 
     async def close(self):
