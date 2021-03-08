@@ -2,7 +2,7 @@
 
 from setuptools import setup, find_packages
 
-tests_require = ['nose', 'scipy', 'mock', 'asynctest']
+tests_require = ['nose', 'mock', 'asynctest']
 
 setup(
     author='MeerKAT SDP Team',
@@ -14,9 +14,17 @@ setup(
     scripts=['scripts/cbfsim.py'],
     setup_requires=['katversion'],
     install_requires=[
-        'aiokatcp', 'aiomonitor', 'spead2>=3.1', 'katpoint', 'numpy', 'h5py',
-        'katsdpsigproc[CUDA]', 'katsdptelstate', 'netifaces', 'numba',
-        'katsdpservices'],
+        'aiokatcp',
+        'h5py',
+        'katpoint',
+        'katsdpservices[argparse,aiomonitor]',
+        'katsdpsigproc[CUDA]',
+        'katsdptelstate',
+        'numba',
+        'numpy',
+        'scipy',
+        'spead2>=3.1'
+    ],
     tests_require=tests_require,
     extras_require={'test': tests_require, 'doc': ['sphinx>=1.3']},
     packages=find_packages(),

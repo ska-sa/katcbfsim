@@ -1,34 +1,13 @@
-aioconsole
+-c https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker-base-build/base-requirements.txt
+
 aiokatcp
-aiomonitor
-appdirs
-async-timeout
-decorator
-ephem
-future
 h5py
-katversion
-llvmlite
-Mako
-MarkupSafe
-msgpack
-netifaces
 numba
 numpy
-pandas
-pycuda
-pyephem
-pygelf
-python-dateutil
-pytools
-pytz
-redis
 scipy
-six
 spead2
-terminaltables
-typing_extensions
+
 katpoint @ git+https://github.com/ska-sa/katpoint
-katsdpservices @ git+https://github.com/ska-sa/katsdpservices
+katsdpservices[argparse,aiomonitor] @ git+https://github.com/ska-sa/katsdpservices
 katsdpsigproc[CUDA] @ git+https://github.com/ska-sa/katsdpsigproc
 katsdptelstate @ git+https://github.com/ska-sa/katsdptelstate
