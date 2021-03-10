@@ -18,7 +18,7 @@ setup(
         'h5py',
         'katpoint',
         'katsdpservices[argparse,aiomonitor]',
-        'katsdpsigproc[CUDA]',
+        'katsdpsigproc[cuda]',
         'katsdptelstate',
         'numba',
         'numpy',
