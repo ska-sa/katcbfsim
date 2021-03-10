@@ -1,4 +1,5 @@
 -c https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker-base-build/base-requirements.txt
+-c https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker-base-gpu-build/requirements.txt
 
 aiokatcp
 h5py
@@ -9,5 +10,5 @@ spead2
 
 katpoint @ git+https://github.com/ska-sa/katpoint
 katsdpservices[argparse,aiomonitor] @ git+https://github.com/ska-sa/katsdpservices
-katsdpsigproc[CUDA] @ git+https://github.com/ska-sa/katsdpsigproc
+katsdpsigproc[cuda] @ git+https://github.com/ska-sa/katsdpsigproc
 katsdptelstate @ git+https://github.com/ska-sa/katsdptelstate
