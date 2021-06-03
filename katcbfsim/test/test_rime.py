@@ -91,7 +91,7 @@ class TestRime(object):
         raw = allocator.allocate_raw(n_channels * n_baselines * 4 * 8)
         # in_data and out_data both alias raw, since _run_sample runs in-place
         in_data = allocator.allocate((n_channels, n_baselines, 2, 2), np.complex64, raw=raw)
-        out_data = allocator.allocate((n_channels, n_baselines, 2, 2, 2), np.int32, raw=raw)
+        out_data = allocator.allocate((n_channels, n_baselines, 2, 2, 2), '>i4', raw=raw)
         delays = np.array([3.0, -4.0, 6.0])           # In m, after phasing
         stokes = (10.0, 7.0, 5.0, 4.0)                # In Jansky
         B = np.matrix([

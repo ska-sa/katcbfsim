@@ -71,7 +71,7 @@ class RimeTemplate(object):
                                      '-34:00:00', '20:00:00', '0.0', 10.0, (i, 0, 0))
                     for i in range(n_antennas)]
         # The values are irrelevant, we just need the memory to be there.
-        out = accel.DeviceArray(context, (n_channels, n_baselines, 2, 2, 2), np.int32)
+        out = accel.DeviceArray(context, (n_channels, n_baselines, 2, 2, 2), '>i4')
 
         def generate_predict(predict_wgs):
             tuning = dict(predict_wgs=predict_wgs, sample_wgs=256, sample_rows=64)
@@ -133,7 +133,7 @@ class Rime(accel.Operation):
         self.phase_center = katpoint.construct_radec_target(0, 0)
         self.position = None
         _2 = accel.Dimension(2, exact=True)
-        self.slots['out'] = accel.IOSlot((n_channels, n_baselines, _2, _2, _2), np.int32)
+        self.slots['out'] = accel.IOSlot((n_channels, n_baselines, _2, _2, _2), '>i4')
         self.predict_kernel = template.predict_program.get_kernel('predict')
         self.sample_kernel = template.sample_program.get_kernel('sample')
         # Set up the inverse wavelength lookup table
