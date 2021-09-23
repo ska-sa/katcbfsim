@@ -166,7 +166,7 @@ class TestRime(object):
                             np.conj(device_samples[channel, baseline_index, 1, 0, ...]),
                             "Autocorrelation is not Hermitian")
                     for k in range(2):
-                        for l in range(2):
+                        for l in range(2):  # noqa: E741
                             cur = samples[2 * i + k, 2 * j + l, ...]
                             ds = device_samples[channel, baseline_index, k, l, ...]
                             cur = np.c_[cur.real, cur.imag].T

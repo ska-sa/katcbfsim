@@ -34,7 +34,7 @@ def _rotate_gains(G, P, out):
     for i in range(G.shape[0]):
         for j in range(G.shape[1]):
             for k in range(2):
-                for l in range(2):
+                for l in range(2):  # noqa: E741
                     out[i, j, k, l] = G[i, j, k, 0] * P[j, 0, l] + G[i, j, k, 1] * P[j, 1, l]
 
 
