@@ -184,7 +184,7 @@ class TestRime(object):
                                 expected = expected[0:1]
                             result = boxm_test(cur, ds)
                             assert_greater(result.pvalue, threshold1)
-                            result = scipy.stats.ttest_1samp(ds, expected, axis=1)
+                            result = scipy.stats.ttest_1samp(ds, np.c_[expected], axis=1)
                             for p in np.atleast_1d(result.pvalue):
                                 assert_greater(p, threshold1)
                     baseline_index += 1
