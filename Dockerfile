@@ -1,13 +1,20 @@
-ARG KATSDPDOCKERBASE_REGISTRY=sdp-docker-registry.kat.ac.za:5000
+ARG KATSDPDOCKERBASE_REGISTRY=127.0.0.1:5000
+# :sdp-docker-registry.kat.ac.za:5000
 
-FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-gpu-build as build
+FROM $KATSDPDOCKERBASE_REGISTRY/base-gpu-build:focaluvpip AS build
 
 # Enable Python 3 environment
 ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
 
 # Install dependencies.
 COPY --chown=kat:kat requirements.txt /tmp/install/requirements.txt
-RUN install_pinned.py -r /tmp/install/requirements.txt
+#RUN install_pinned.py -r /tmp/install/requirements.txt
+
+RUN chmod -R 777 /tmp/install
+COPY requirements.txt /tmp/install/
+RUN uv pip compile /tmp/install/requirements.txt \
+      -o /tmp/install/requirements.lock && \
+    uv pip sync /tmp/install/requirements.lock 
 
 # Install the package
 COPY --chown=kat:kat . /tmp/install/katcbfsim
@@ -20,7 +27,7 @@ RUN python -c 'import katcbfsim; print("Successful import")'
 
 #######################################################################
 
-FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-gpu-runtime
+FROM $KATSDPDOCKERBASE_REGISTRY/base-gpu-runtime:focaluvpip
 LABEL maintainer="sdpdev+katcbfsim@ska.ac.za"
 
 # Install from the build stage
