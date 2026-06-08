@@ -1,4 +1,4 @@
-ARG KATSDPDOCKERBASE_REGISTRY=127.0.0.1:5000
+ARG KATSDPDOCKERBASE_REGISTRY=harbor.sdp.kat.ac.za/dpp
 # :sdp-docker-registry.kat.ac.za:5000
 
 FROM $KATSDPDOCKERBASE_REGISTRY/base-gpu-build:focaluvpip AS build
