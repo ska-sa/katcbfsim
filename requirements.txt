@@ -1,5 +1,5 @@
--c https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker-base-build/base-requirements.txt
--c https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker-base-gpu-build/requirements.txt
+-r https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/uvpipjammy/docker-base-build/base-requirements.txt
+-r https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/uvpipjammy/docker-base-gpu-build/requirements.txt
 
 aiokatcp
 h5py
@@ -7,6 +7,7 @@ numba
 numpy
 scipy
 spead2
+
 
 katpoint @ git+https://github.com/ska-sa/katpoint
 katsdpservices[argparse,aiomonitor] @ git+https://github.com/ska-sa/katsdpservices

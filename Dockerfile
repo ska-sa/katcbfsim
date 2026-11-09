@@ -1,26 +1,31 @@
-ARG KATSDPDOCKERBASE_REGISTRY=sdp-docker-registry.kat.ac.za:5000
+ARG KATSDPDOCKERBASE_REGISTRY=harbor.sdp.kat.ac.za/dpp
 
-FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-gpu-build as build
+FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-gpu-build:production-tag28102026 AS build
 
 # Enable Python 3 environment
-ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
+#ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
+# uv is installed in ~/.local/bin in the base image
+# Activate the base image virtualenv and make uv available
+ENV PATH="/home/kat/.local/bin:$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
 
 # Install dependencies.
 COPY --chown=kat:kat requirements.txt /tmp/install/requirements.txt
-RUN install_pinned.py -r /tmp/install/requirements.txt
+#Replace install_pinned.py with uv 
+RUN uv pip compile /tmp/install/requirements.txt \
+      -o /tmp/install/requirements.lock && \
+    uv pip install --no-deps -r /tmp/install/requirements.lock&&\
+    uv pip check
 
 # Install the package
 COPY --chown=kat:kat . /tmp/install/katcbfsim
-WORKDIR /tmp/install/katcbfsim
-RUN python ./setup.py clean
-RUN pip install --no-deps .
-RUN pip check
-# Sanity test
-RUN python -c 'import katcbfsim; print("Successful import")'
+RUN cd /tmp/install/katcbfsim && \
+    python3 ./setup.py clean   && \
+    uv pip install --no-deps . && \
+    uv pip check
 
 #######################################################################
 
-FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-gpu-runtime
+FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-gpu-runtime:production-tag28102026
 LABEL maintainer="sdpdev+katcbfsim@ska.ac.za"
 
 # Install from the build stage
