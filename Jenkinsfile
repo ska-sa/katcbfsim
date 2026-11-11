@@ -6,6 +6,6 @@ katsdp.setDependencies([
     'ska-sa/katpoint/master',
     'ska-sa/katsdpservices/master',
     'ska-sa/katsdptelstate/master',
-    'ska-sa/katsdpdockerbase/master'])
+    'ska-sa/katsdpdockerbase/uvpipjammy'])
 katsdp.standardBuild(cuda: true)
 katsdp.mail('sdpdev+katcbfsim@ska.ac.za')
