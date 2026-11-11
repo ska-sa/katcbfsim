@@ -1,6 +1,6 @@
 ARG KATSDPDOCKERBASE_REGISTRY=harbor.sdp.kat.ac.za/dpp
 
-FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-gpu-build:production-tag28102026 AS build
+FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-gpu-build:uvpipjammy AS build
 
 # Enable Python 3 environment
 #ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
@@ -25,7 +25,7 @@ RUN cd /tmp/install/katcbfsim && \
 
 #######################################################################
 
-FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-gpu-runtime:production-tag28102026
+FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-gpu-runtime:uvpipjammy
 LABEL maintainer="sdpdev+katcbfsim@ska.ac.za"
 
 # Install from the build stage
