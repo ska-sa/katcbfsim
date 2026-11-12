@@ -3,7 +3,6 @@ ARG KATSDPDOCKERBASE_REGISTRY=harbor.sdp.kat.ac.za/dpp
 FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-gpu-build AS build
 
 # Enable Python 3 environment
-#ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
 # uv is installed in ~/.local/bin in the base image
 # Activate the base image virtualenv and make uv available
 ENV PATH="/home/kat/.local/bin:$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
