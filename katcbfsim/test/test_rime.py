@@ -1,13 +1,13 @@
 """Tests for :mod:`katcbfsim.rime`."""
 
 from katsdpsigproc import accel
-from katsdpsigproc.test.test_accel import device_test, cuda_test, force_autotune
 from katcbfsim import rime
 from nose.tools import nottest, assert_true, assert_greater
 import katpoint
 import numpy as np
 import scipy.stats
 from collections import namedtuple
+import pytest
 
 
 @nottest
@@ -68,9 +68,7 @@ def test_rotate_gains():
 class TestRime(object):
     """Tests for :class:`katcbfsim.rime.Rime`."""
 
-    @device_test
-    @cuda_test
-    def test_sample_stats(self, context, queue):
+    def test_sample_stats(self, context, command_queue):
         """Run a dumb CPU simulation for a small array, and check that the
         statistics are the same as the GPU simulation. For simplicity, we
         simulate only a single polarised source with a flat spectrum.
@@ -103,7 +101,7 @@ class TestRime(object):
         template = rime.RimeTemplate(context, n_antennas)
         # The actual antennas are irrelevant for this test
         antennas = [None] * n_antennas
-        fn = template.instantiate(queue, 1284e6, 856e6, n_channels,
+        fn = template.instantiate(command_queue, 1284e6, 856e6, n_channels,
                                   n_accs, [], antennas, sefd, seed=1)
         fn.bind(out=out_data)
         fn.ensure_all_bound()
@@ -135,9 +133,9 @@ class TestRime(object):
         out_data_host = out_data.empty_like()
         device_samples = np.empty((n_channels, n_baselines, 2, 2, n_samples), np.complex64)
         for i in range(n_samples):
-            in_data.set(queue, in_data_host)
+            in_data.set(command_queue, in_data_host)
             fn._run_sample()
-            out_data.get(queue, out_data_host)
+            out_data.get(command_queue, out_data_host)
             device_samples[..., i] = out_data_host[..., 0] + 1j * out_data_host[..., 1]
 
         # Compare to a simple CPU simulation
@@ -189,9 +187,7 @@ class TestRime(object):
                                 assert_greater(p, threshold1)
                     baseline_index += 1
 
-    @device_test
-    @cuda_test
-    @force_autotune
-    def test_autotune(self, context, queue):
+    @pytest.mark.force_autotune
+    def test_autotune(self, context, command_queue):
         """Test that autotuner runs successfully"""
         rime.RimeTemplate(context, 64)

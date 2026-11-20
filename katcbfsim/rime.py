@@ -49,12 +49,12 @@ class RimeTemplate(object):
         self.predict_wgs = tuning['predict_wgs']
         self.predict_program = accel.build(
             context, 'predict.mako', {'max_antennas': max_antennas},
-            extra_dirs=[str(importlib.resources.files(__name__))])
+            extra_dirs=[str(importlib.resources.files('katcbfsim'))])
         self.sample_wgs = tuning['sample_wgs']
         self.sample_rows = tuning['sample_rows']
         self.sample_program = accel.build(
             context, 'sample.mako', {},
-            extra_dirs=[str(importlib.resources.files(__name__))])
+            extra_dirs=[str(importlib.resources.files('katcbfsim'))])
 
     @classmethod
     @tune.autotuner(test={'predict_wgs': 64, 'sample_wgs': 256, 'sample_rows': 64})
