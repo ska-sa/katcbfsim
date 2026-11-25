@@ -3,3 +3,4 @@ asynctest
 coverage
 nose
 pytest
+pytest-cov
