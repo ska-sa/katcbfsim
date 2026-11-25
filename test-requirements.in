@@ -2,3 +2,4 @@
 asynctest
 coverage
 nose
+pytest
